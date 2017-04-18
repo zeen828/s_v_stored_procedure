@@ -1,0 +1,85 @@
+﻿###############################################################################
+                          正式-vidol_billing
+###############################################################################
+
+#//序號兌換 package
+
+USE vidol_billing
+DROP PROCEDURE IF EXISTS exchange_SN;
+
+DELIMITER //
+Create procedure exchange_SN(a_user_creat int(11),a_user_no int(11),a_mongo_id varchar(10),a_member_id varchar(6),a_coupon_sn varchar(20),a_ip varchar(30),out result varchar(40))
+BEGIN
+
+DECLARE s_coupon_package_no int(11);
+SET result = CONCAT_WS(',',401,0,0);
+
+IF (length(a_coupon_sn) > 0) THEN
+##確認兌換序號的使用者用的是 mongo   or member
+IF (SELECT COUNT(*) FROM Coupon_tbl WHERE c_status = 1 AND c_repeat > 0 AND c_sn = a_coupon_sn AND c_set_package_no > 0 AND c_assign = '0' OR c_assign = a_mongo_id)>0 THEN
+#GET coupon info
+SELECT c_set_package_no FROM Coupon_tbl WHERE c_status = 1 AND c_repeat > 0 AND c_sn = a_coupon_sn INTO s_coupon_package_no;
+
+#exchange_SN payment_no = 0, invoice_type=0
+call add_order(a_user_creat,a_user_no,a_mongo_id,a_member_id,s_coupon_package_no,0,a_coupon_sn,0,a_ip,@add_order_result);
+select @add_order_result into result;
+
+END IF;
+END IF;
+
+END//
+DELIMITER ;
+
+
+###############################################################################
+                          測試-test_Billing
+###############################################################################
+
+#//序號兌換 package
+
+USE test_Billing
+DROP PROCEDURE IF EXISTS exchange_SN;
+
+DELIMITER //
+Create procedure exchange_SN(a_user_creat int(11),a_user_no int(11),a_mongo_id varchar(10),a_member_id varchar(6),a_coupon_sn varchar(20),a_ip varchar(30),out result varchar(40))
+BEGIN
+
+DECLARE s_coupon_package_no int(11);
+SET result = CONCAT_WS(',',401,0,0);
+
+IF (length(a_coupon_sn) > 0) THEN
+##確認兌換序號的使用者用的是 mongo   or member
+IF (SELECT COUNT(*) FROM Coupon_tbl WHERE c_status = 1 AND c_repeat > 0 AND c_sn = a_coupon_sn AND c_set_package_no > 0 AND c_assign = '0' OR c_assign = a_mongo_id)>0 THEN
+#GET coupon info
+SELECT c_set_package_no FROM Coupon_tbl WHERE c_status = 1 AND c_repeat > 0 AND c_sn = a_coupon_sn INTO s_coupon_package_no;
+
+#exchange_SN payment_no = 0, invoice_type=0
+call add_order(a_user_creat,a_user_no,a_mongo_id,a_member_id,s_coupon_package_no,0,a_coupon_sn,0,a_ip,@add_order_result);
+select @add_order_result into result;
+
+END IF;
+END IF;
+
+END//
+DELIMITER ;
+
+
+###############################################################################
+                          檢驗
+###############################################################################
+
+#200 訂單成功
+#405 無此商品
+#401 COUPON無法使用
+#404 COUPON已使用
+#call exchange_SN(a_user_creat int(11),a_user_no int(11),a_mongo_id varchar(10),a_member_id varchar(6),a_coupon_sn varchar(20),a_ip varchar(30),out result varchar(40))
+
+call exchange_SN(0,0,'jb9A4bcTXF','tSETCL','XFZYENABUPCSBGSR','127.0.0.1',@result);
+select @result;
+
++----------------------------+
+| @result                    |
++----------------------------+
+| 200,00014781542170000022,0 |
++----------------------------+
+#回應碼,訂單編號,金額

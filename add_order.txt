@@ -1,0 +1,283 @@
+﻿###############################################################################
+                          正式-vidol_billing
+###############################################################################
+
+#//寫入訂單 insert_order_no
+
+USE vidol_billing
+DROP PROCEDURE IF EXISTS add_order;
+
+DELIMITER //
+Create procedure add_order(a_user_creat int(11),a_user_no int(11),a_mongo_id varchar(10),a_member_id varchar(6),a_package_no int(11),a_payment_no int(11),a_coupon_sn varchar(20),a_invoice_type varchar(10),a_ip varchar(30),out result varchar(40))
+BEGIN
+
+DECLARE s_order_no varchar(20);
+DECLARE s_package_title varchar(100);
+DECLARE s_cost int(10);
+DECLARE s_price int(10);
+DECLARE s_type tinyint(5);
+DECLARE s_unit enum('hour', 'count');
+DECLARE s_unit_value int(10);
+DECLARE s_coupon_no int(11);
+DECLARE s_coupon_title varchar(100);
+DECLARE s_coupon_type varchar(20);
+DECLARE s_coupon_package_no int(11);
+DECLARE s_coupon_discount decimal(5,2);
+DECLARE s_coupon_cash int(10);
+DECLARE s_user_repeat int(10);
+DECLARE s_subtotal int(10);
+DECLARE s_expenses int(10);
+DECLARE s_coupon_check tinyint(1);
+
+SET s_expenses=0;
+SET s_coupon_check=1;
+SET result = CONCAT_WS(',',405,0,0);
+
+IF (SELECT COUNT(*) FROM Sold_packages_tbl WHERE sp_pk = a_package_no AND sp_status = 1)>0 THEN
+#GET package info
+SELECT sp_title,sp_type,sp_cost,sp_price,sp_unit,sp_unit_value FROM Sold_packages_tbl WHERE sp_pk = a_package_no AND sp_status = 1 INTO s_package_title,s_type,s_cost,s_price,s_unit,s_unit_value;
+
+IF (length(a_coupon_sn) > 0) THEN
+#SELECT a_coupon_sn and check c_assign is to user?
+##確認兌換序號的使用者用的是 mongo   or member
+IF (SELECT COUNT(*) FROM Coupon_tbl WHERE c_status = 1 AND c_repeat > 0 AND c_sn = a_coupon_sn AND c_assign = '0' OR c_assign = a_mongo_id)>0 THEN
+SET s_coupon_check=1;
+#GET coupon info
+SELECT c_set_no,c_set_title,c_set_type,c_set_package_no,c_set_discount,c_set_cash,c_user_repeat FROM Coupon_tbl WHERE c_status = 1 AND c_repeat > 0 AND c_sn = a_coupon_sn INTO s_coupon_no,s_coupon_title,s_coupon_type,s_coupon_package_no,s_coupon_discount,s_coupon_cash,s_user_repeat;
+#Check one user re use;
+IF( SELECT COUNT(*) FROM Order_cashs_tbl WHERE oc_mongo_id = a_mongo_id AND oc_coupon_sn = a_coupon_sn ) < s_user_repeat THEN
+
+IF(s_coupon_package_no = 0 or s_coupon_package_no = a_package_no ) THEN 
+
+IF (s_coupon_cash > 0) THEN
+SET s_expenses = s_coupon_cash;
+END IF;
+IF (s_coupon_discount < 1) THEN
+SET s_expenses = s_expenses + FLOOR((s_price-s_expenses) * (1 - s_coupon_discount));
+END IF;
+IF (s_coupon_package_no = a_package_no) THEN
+SET s_expenses = s_price;
+END IF;
+
+ELSE
+SET s_coupon_check=3;
+END IF;
+
+ELSE
+#Check one user re use = use too more;
+SET s_coupon_check=2;
+
+END IF;
+
+ELSE
+SET s_coupon_check=0;
+END IF;
+END IF;
+IF (s_coupon_check = 1 ) THEN
+#GET order no
+call get_order_no(a_user_no,a_mongo_id,a_member_id,@order_no);
+select @order_no INTO s_order_no;
+IF(s_order_no > 0 ) THEN
+
+IF (length(a_coupon_sn) > 0) THEN
+UPDATE Coupon_tbl SET c_repeat = c_repeat - 1 WHERE c_status = 1 AND c_repeat > 0 AND c_sn = a_coupon_sn;
+END IF;
+
+IF (s_price - s_expenses) < 0 THEN
+SET s_subtotal = 0;
+ELSE
+SET s_subtotal = s_price - s_expenses;
+END IF;
+
+#INSERT order
+INSERT INTO  `Orders_tbl` (`o_order_sn` ,`o_user_creat` ,`o_user_no` ,`o_mongo_id` ,`o_member_id` ,`o_package_no` ,`o_package_title` ,`o_package_type`,`o_package_unit`,`o_package_unit_value`,`o_payment_no` ,`o_cost` ,`o_price` ,`o_coupon_no` ,`o_coupon_sn` ,`o_coupon_title` ,`o_expenses` ,`o_subtotal` ,`o_invoice_type` ,`o_status` ,`o_ip`)
+VALUES (
+s_order_no ,  a_user_creat,  a_user_no,  a_mongo_id,  a_member_id,  a_package_no,  s_package_title, s_type, s_unit, s_unit_value, a_payment_no ,  s_cost,  s_price,  s_coupon_no, a_coupon_sn , s_coupon_title , s_expenses ,  s_subtotal,  a_invoice_type , 0 , a_ip
+);
+
+SET result=CONCAT_WS(',',200,s_order_no,s_subtotal);
+
+ELSE
+SET result=CONCAT_WS(',',406,0,0);
+END IF;
+
+ELSEIF (s_coupon_check = 2 ) THEN
+SET result=CONCAT_WS(',',404,0,0);
+ELSEIF (s_coupon_check = 3 ) THEN
+SET result=CONCAT_WS(',',409,0,0);
+ELSE
+SET result=CONCAT_WS(',',401,0,0);
+END IF;
+
+END IF;
+
+END//
+DELIMITER ;
+
+
+###############################################################################
+                          測試-test_Billing
+###############################################################################
+
+#//寫入訂單 insert_order_no
+
+USE test_Billing
+DROP PROCEDURE IF EXISTS add_order;
+
+DELIMITER //
+Create procedure add_order(a_user_creat int(11),a_user_no int(11),a_mongo_id varchar(10),a_member_id varchar(6),a_package_no int(11),a_payment_no int(11),a_coupon_sn varchar(20),a_invoice_type varchar(10),a_ip varchar(30),out result varchar(40))
+BEGIN
+
+DECLARE s_order_no varchar(20);
+DECLARE s_package_title varchar(100);
+DECLARE s_cost int(10);
+DECLARE s_price int(10);
+DECLARE s_type tinyint(5);
+DECLARE s_unit enum('hour', 'count');
+DECLARE s_unit_value int(10);
+DECLARE s_coupon_no int(11);
+DECLARE s_coupon_title varchar(100);
+DECLARE s_coupon_type varchar(20);
+DECLARE s_coupon_package_no int(11);
+DECLARE s_coupon_discount decimal(5,2);
+DECLARE s_coupon_cash int(10);
+DECLARE s_user_repeat int(10);
+DECLARE s_subtotal int(10);
+DECLARE s_expenses int(10);
+DECLARE s_coupon_check tinyint(1);
+
+SET s_expenses=0;
+SET s_coupon_check=1;
+SET result = CONCAT_WS(',',405,0,0);
+
+IF (SELECT COUNT(*) FROM Sold_packages_tbl WHERE sp_pk = a_package_no AND sp_status = 1)>0 THEN
+#GET package info
+SELECT sp_title,sp_type,sp_cost,sp_price,sp_unit,sp_unit_value FROM Sold_packages_tbl WHERE sp_pk = a_package_no AND sp_status = 1 INTO s_package_title,s_type,s_cost,s_price,s_unit,s_unit_value;
+
+IF (length(a_coupon_sn) > 0) THEN
+#SELECT a_coupon_sn and check c_assign is to user?
+##確認兌換序號的使用者用的是 mongo   or member
+IF (SELECT COUNT(*) FROM Coupon_tbl WHERE c_status = 1 AND c_repeat > 0 AND c_sn = a_coupon_sn AND c_assign = '0' OR c_assign = a_mongo_id)>0 THEN
+SET s_coupon_check=1;
+#GET coupon info
+SELECT c_set_no,c_set_title,c_set_type,c_set_package_no,c_set_discount,c_set_cash,c_user_repeat FROM Coupon_tbl WHERE c_status = 1 AND c_repeat > 0 AND c_sn = a_coupon_sn INTO s_coupon_no,s_coupon_title,s_coupon_type,s_coupon_package_no,s_coupon_discount,s_coupon_cash,s_user_repeat;
+#Check one user re use;
+IF( SELECT COUNT(*) FROM Order_cashs_tbl WHERE oc_mongo_id = a_mongo_id AND oc_coupon_sn = a_coupon_sn ) < s_user_repeat THEN
+
+IF(s_coupon_package_no = 0 or s_coupon_package_no = a_package_no ) THEN 
+
+IF (s_coupon_cash > 0) THEN
+SET s_expenses = s_coupon_cash;
+END IF;
+IF (s_coupon_discount < 1) THEN
+SET s_expenses = s_expenses + FLOOR((s_price-s_expenses) * (1 - s_coupon_discount));
+END IF;
+IF (s_coupon_package_no = a_package_no) THEN
+SET s_expenses = s_price;
+END IF;
+
+ELSE
+SET s_coupon_check=3;
+END IF;
+
+ELSE
+#Check one user re use = use too more;
+SET s_coupon_check=2;
+
+END IF;
+
+ELSE
+SET s_coupon_check=0;
+END IF;
+END IF;
+IF (s_coupon_check = 1 ) THEN
+#GET order no
+call get_order_no(a_user_no,a_mongo_id,a_member_id,@order_no);
+select @order_no INTO s_order_no;
+IF(s_order_no > 0 ) THEN
+
+IF (length(a_coupon_sn) > 0) THEN
+UPDATE Coupon_tbl SET c_repeat = c_repeat - 1 WHERE c_status = 1 AND c_repeat > 0 AND c_sn = a_coupon_sn;
+END IF;
+
+IF (s_price - s_expenses) < 0 THEN
+SET s_subtotal = 0;
+ELSE
+SET s_subtotal = s_price - s_expenses;
+END IF;
+
+#INSERT order
+INSERT INTO  `Orders_tbl` (`o_order_sn` ,`o_user_creat` ,`o_user_no` ,`o_mongo_id` ,`o_member_id` ,`o_package_no` ,`o_package_title` ,`o_package_type`,`o_package_unit`,`o_package_unit_value`,`o_payment_no` ,`o_cost` ,`o_price` ,`o_coupon_no` ,`o_coupon_sn` ,`o_coupon_title` ,`o_expenses` ,`o_subtotal` ,`o_invoice_type` ,`o_status` ,`o_ip`)
+VALUES (
+s_order_no ,  a_user_creat,  a_user_no,  a_mongo_id,  a_member_id,  a_package_no,  s_package_title, s_type, s_unit, s_unit_value, a_payment_no ,  s_cost,  s_price,  s_coupon_no, a_coupon_sn , s_coupon_title , s_expenses ,  s_subtotal,  a_invoice_type , 0 , a_ip
+);
+
+SET result=CONCAT_WS(',',200,s_order_no,s_subtotal);
+
+ELSE
+SET result=CONCAT_WS(',',406,0,0);
+END IF;
+
+ELSEIF (s_coupon_check = 2 ) THEN
+SET result=CONCAT_WS(',',404,0,0);
+ELSEIF (s_coupon_check = 3 ) THEN
+SET result=CONCAT_WS(',',409,0,0);
+ELSE
+SET result=CONCAT_WS(',',401,0,0);
+END IF;
+
+END IF;
+
+END//
+DELIMITER ;
+
+
+###############################################################################
+                          檢驗
+###############################################################################
+
+#200 訂單成功
+#405 無此商品
+#401 COUPON無法使用
+#406 訂單寫入失敗
+#404 COUPON已使用
+#409 COUPON與商品不符
+#call get_order_no(14,'tSETCL',@result);
+#call get_order_no(14,'tSETCL',@result);
+#add_order(a_user_creat int(11),a_user_no int(11),a_mongo_id varchar(10),a_member_id varchar(6),a_package_no int(11),a_payment_no int(11),a_coupon_sn varchar(20),a_invoice_type varchar(10),a_ip varchar(30),out result varchar(20))
+
+使用序號 成功
+call add_order(0,0,'jb9A4bcTXF','tSETCL',11,1,'1JQG6LBRURO3HKFX',1,'127.0.0.1',@result);
+select @result;
+
+不使用序號
+call add_order(0,0,'jb9A4bcTXF','tSETCL',11,1,'',1,'127.0.0.1',@result);
+select @result;
+
+call add_order(0,0,'jb9A4bcTXF','tSETCL',11,1,'',1,'127.0.0.1',@result);
+select @result;
+  #購買單次
+call add_order(0,0,'jb9A4bcTXF','tSETCL',36,1,'',1,'127.0.0.1',@result);
+select @result;
+
+序號錯誤 
+call add_order(0,0,'jb9A4bcTXF','tSETCL',11,1,'EQ5VNDHsZ',1,'127.0.0.1',@result);
+select @result;
+
+序號折抵金額
+call add_order(0,0,'jb9A4bcTXF','tSETCL',11,1,'UR3DVTM12UD5ZGK8L4IY',1,'127.0.0.1',@result);
+select @result;
+
+序號折扣
+call add_order(0,0,'jb9A4bcTXF','tSETCL',12,1,'8LLX1YNJUVWMTRFT',1,'127.0.0.1',@result);
+select @result;
+
+call add_order(0,0,'jb9A4bcTXF','tSETCL',11,1,'HIIN9WZDQMS1LNZB',1,'127.0.0.1',@result);
+select @result;
+
++----------------------------+
+| @result                    |
++----------------------------+
+| 200,00014781542170000022,0 |
++----------------------------+
+#回應碼,訂單編號,金額

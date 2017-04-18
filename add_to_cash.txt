@@ -1,0 +1,179 @@
+﻿###############################################################################
+                          正式-vidol_billing
+###############################################################################
+
+#//訂單成立 
+
+USE vidol_billing
+DROP PROCEDURE IF EXISTS add_to_cash;
+
+DELIMITER //
+Create procedure add_to_cash(a_order_sn varchar(20),a_trade_no varchar(20),a_rs tinyint(1),a_TokenUseStatus int(1),a_TokenValue varchar(70),a_TokenLife date,out result varchar(40))
+BEGIN
+
+DECLARE s_package_no int(11);
+DECLARE s_user_no int(11);
+DECLARE s_mongo_id varchar(10); 
+DECLARE s_member_id varchar(6);
+DECLARE s_type tinyint(5);
+DECLARE s_unit enum('hour', 'count');
+DECLARE s_unit_value int(10);
+DECLARE s_subtotal  int(10);
+DECLARE s_time_active timestamp;
+DECLARE s_time_deadline timestamp;
+DECLARE result_tmp varchar(6);
+DECLARE CONTINUE HANDLER FOR SQLSTATE '23000' SET result = 500;
+SET result_tmp = 200;
+SET result = 401;
+
+IF(SELECT COUNT(*) FROM `Orders_tbl` WHERE o_status = 0 AND o_order_sn = a_order_sn ) > 0 THEN
+
+SELECT o_package_no,o_user_no,	o_mongo_id,o_member_id,o_package_type,o_package_unit,o_package_unit_value,o_subtotal FROM `Orders_tbl` WHERE o_order_sn = a_order_sn INTO s_package_no,s_user_no,s_mongo_id,s_member_id,s_type,s_unit,s_unit_value,s_subtotal;
+
+#判斷是否有相同package type要累加
+IF (SELECT COUNT(*) FROM `Order_cashs_tbl` WHERE oc_time_deadline > NOW() AND oc_status = 1 AND oc_active_status = 1 AND oc_package_type = s_type AND oc_mongo_id = s_mongo_id) > 0 THEN
+SELECT oc_time_deadline FROM `Order_cashs_tbl` WHERE oc_time_deadline > NOW()  AND oc_status = 1 AND oc_active_status = 1 AND oc_package_type = s_type AND oc_mongo_id = s_mongo_id ORDER BY oc_time_deadline DESC LIMIT 1 INTO s_time_active ;
+ELSE
+SET s_time_active = NOW();
+END IF;
+
+
+#package類型('hour', 'count')
+CASE s_unit
+WHEN 'hour' THEN SELECT date_add(s_time_active,interval s_unit_value hour) INTO s_time_deadline; 
+WHEN 'count' THEN SET s_time_deadline = '2037-12-31 00:00:00',s_time_active = NOW();
+ELSE SET result_tmp = 404;
+END CASE;
+
+IF (result_tmp = 200) THEN
+
+SET result = 200;
+INSERT INTO `vidol_billing`.`Order_cashs_tbl` (`oc_order_sn`,`oc_trade_no`, `oc_user_creat`, `oc_user_no`, `oc_mongo_id`, `oc_member_id`, `oc_package_no`, `oc_package_title`,`oc_package_type`,`oc_package_unit`, `oc_package_unit_value`,`oc_payment_no`, `oc_cost`, `oc_price`, `oc_coupon_no`, `oc_coupon_sn`, `oc_coupon_title`, `oc_expenses`, `oc_subtotal`, `oc_rs`, `oc_invoice_type`, `oc_invoice`, `oc_status`, `oc_active_status`,`oc_time_paytime`,`oc_time_active`,`oc_time_deadline`, `oc_ip`,`oc_TokenUseStatus`,`oc_TokenValue`,`oc_TokenLife`) SELECT `o_order_sn`, a_trade_no, `o_user_creat`, `o_user_no`, `o_mongo_id`, `o_member_id`, `o_package_no`, `o_package_title`,`o_package_type`,`o_package_unit`,`o_package_unit_value`, `o_payment_no`, `o_cost`, `o_price`, `o_coupon_no`, `o_coupon_sn`, `o_coupon_title`, `o_expenses`, `o_subtotal`, a_rs, `o_invoice_type`, `o_invoice`,  1 , 1 , NOW() , s_time_active, s_time_deadline , `o_ip` ,a_TokenUseStatus,a_TokenValue,a_TokenLife FROM `Orders_tbl` WHERE o_order_sn = a_order_sn;
+UPDATE Orders_tbl SET o_status = 1 , o_rs = a_rs ,o_time_active = s_time_active , o_time_deadline = s_time_deadline  WHERE o_order_sn = a_order_sn;
+
+UPDATE Pay2goInvoice_tbl SET TransNum = a_trade_no , pi_order_status = 1 WHERE MerchantOrderNo = a_order_sn;
+
+
+IF(SELECT COUNT(*) FROM Account_accumulation_tbl WHERE a_member_id = s_member_id ) > 0 THEN
+UPDATE Account_accumulation_tbl SET a_amount = a_amount + s_subtotal,a_time_last = now() WHERE a_member_id = s_member_id;
+ELSE
+INSERT INTO Account_accumulation_tbl (`a_user_no`,`	a_mongo_id`,`a_member_id`,`a_amount`,`a_time_last`) VALUES (s_user_no,s_mongo_id,s_member_id,s_subtotal,now());
+END IF;
+
+ELSE
+SET result = 401;
+END IF;
+
+ELSE
+SET result = 404;
+END IF;
+
+END//
+DELIMITER ;
+
+###############################################################################
+                          測試-test_Billing
+###############################################################################
+
+#//訂單成立 
+
+USE test_Billing
+DROP PROCEDURE IF EXISTS add_to_cash;
+
+DELIMITER //
+Create procedure add_to_cash(a_order_sn varchar(20),a_trade_no varchar(20),a_rs tinyint(1),a_TokenUseStatus int(1),a_TokenValue varchar(70),a_TokenLife date,out result varchar(40))
+BEGIN
+
+DECLARE s_package_no int(11);
+DECLARE s_user_no int(11);
+DECLARE s_mongo_id varchar(10); 
+DECLARE s_member_id varchar(6);
+DECLARE s_type tinyint(5);
+DECLARE s_unit enum('hour', 'count');
+DECLARE s_unit_value int(10);
+DECLARE s_subtotal  int(10);
+DECLARE s_time_active timestamp;
+DECLARE s_time_deadline timestamp;
+DECLARE result_tmp varchar(6);
+DECLARE CONTINUE HANDLER FOR SQLSTATE '23000' SET result = 500;
+SET result_tmp = 200;
+SET result = 401;
+
+IF(SELECT COUNT(*) FROM `Orders_tbl` WHERE o_status = 0 AND o_order_sn = a_order_sn ) > 0 THEN
+
+SELECT o_package_no,o_user_no,	o_mongo_id,o_member_id,o_package_type,o_package_unit,o_package_unit_value,o_subtotal FROM `Orders_tbl` WHERE o_order_sn = a_order_sn INTO s_package_no,s_user_no,s_mongo_id,s_member_id,s_type,s_unit,s_unit_value,s_subtotal;
+
+#判斷是否有相同package type要累加
+IF (SELECT COUNT(*) FROM `Order_cashs_tbl` WHERE oc_time_deadline > NOW() AND oc_status = 1 AND oc_active_status = 1 AND oc_package_type = s_type AND oc_mongo_id = s_mongo_id) > 0 THEN
+SELECT oc_time_deadline FROM `Order_cashs_tbl` WHERE oc_time_deadline > NOW()  AND oc_status = 1 AND oc_active_status = 1 AND oc_package_type = s_type AND oc_mongo_id = s_mongo_id ORDER BY oc_time_deadline DESC LIMIT 1 INTO s_time_active ;
+ELSE
+SET s_time_active = NOW();
+END IF;
+
+
+#package類型('hour', 'count')
+CASE s_unit
+WHEN 'hour' THEN SELECT date_add(s_time_active,interval s_unit_value hour) INTO s_time_deadline; 
+WHEN 'count' THEN SET s_time_deadline = '2037-12-31 00:00:00',s_time_active = NOW();
+ELSE SET result_tmp = 404;
+END CASE;
+
+IF (result_tmp = 200) THEN
+
+SET result = 200;
+INSERT INTO `Order_cashs_tbl` (`oc_order_sn`,`oc_trade_no`, `oc_user_creat`, `oc_user_no`, `oc_mongo_id`, `oc_member_id`, `oc_package_no`, `oc_package_title`,`oc_package_type`,`oc_package_unit`, `oc_package_unit_value`,`oc_payment_no`, `oc_cost`, `oc_price`, `oc_coupon_no`, `oc_coupon_sn`, `oc_coupon_title`, `oc_expenses`, `oc_subtotal`, `oc_rs`, `oc_invoice_type`, `oc_invoice`, `oc_status`, `oc_active_status`,`oc_time_paytime`,`oc_time_active`,`oc_time_deadline`, `oc_ip`,`oc_TokenUseStatus`,`oc_TokenValue`,`oc_TokenLife`) SELECT `o_order_sn`, a_trade_no, `o_user_creat`, `o_user_no`, `o_mongo_id`, `o_member_id`, `o_package_no`, `o_package_title`,`o_package_type`,`o_package_unit`,`o_package_unit_value`, `o_payment_no`, `o_cost`, `o_price`, `o_coupon_no`, `o_coupon_sn`, `o_coupon_title`, `o_expenses`, `o_subtotal`, a_rs, `o_invoice_type`, `o_invoice`,  1 , 1 , NOW() , s_time_active, s_time_deadline , `o_ip` ,a_TokenUseStatus,a_TokenValue,a_TokenLife FROM `Orders_tbl` WHERE o_order_sn = a_order_sn;
+UPDATE Orders_tbl SET o_status = 1 , o_rs = a_rs ,o_time_active = s_time_active , o_time_deadline = s_time_deadline  WHERE o_order_sn = a_order_sn;
+
+UPDATE Pay2goInvoice_tbl SET TransNum = a_trade_no , pi_order_status = 1 WHERE MerchantOrderNo = a_order_sn;
+
+
+IF(SELECT COUNT(*) FROM Account_accumulation_tbl WHERE a_member_id = s_member_id ) > 0 THEN
+UPDATE Account_accumulation_tbl SET a_amount = a_amount + s_subtotal,a_time_last = now() WHERE a_member_id = s_member_id;
+ELSE
+INSERT INTO Account_accumulation_tbl (`a_user_no`,`	a_mongo_id`,`a_member_id`,`a_amount`,`a_time_last`) VALUES (s_user_no,s_mongo_id,s_member_id,s_subtotal,now());
+END IF;
+
+ELSE
+SET result = 401;
+END IF;
+
+ELSE
+SET result = 404;
+END IF;
+
+END//
+DELIMITER ;
+
+###############################################################################
+                          檢驗
+###############################################################################
+
+#200 付費成功
+#404 訂單不存在
+#401 package類型錯誤
+#500 訂單號碼重複寫入
+
+#call add_to_cash(a_order_sn varchar(20),a_trade_no varchar(20),a_rs tinyint(1),a_TokenUseStatus int(1),a_TokenValue varchar(70),a_TokenLife timestamp,out result varchar(40))
+
+call add_to_cash('00014786643780000257','1235542',0,0,'','',@result);
+select @result;
+
+call add_to_cash('00014785090580000132','1235543',1,1,'WHIUIUGDWOPHI','2018-11-12',@result);
+select @result;
+
+call add_to_cash('00014782497200000038','1235543',0,0,'','',@result);
+select @result;
+
+
+call add_to_cash('00014782460240000035','1235548',0,1,'WHIUIUGDWOPHI','2018-11-12',@result);
+select @result;
+
+call add_to_cash('00014784888310000119','1235542',1,0,'','',@result);
+select @result;
+
++---------+
+| @result |
++---------+
+| 200     |
++---------+
+#回應碼

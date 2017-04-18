@@ -1,0 +1,52 @@
+﻿###############################################################################
+                          正式-vidol_billing
+###############################################################################
+
+#檢查取得的order_no是否唯一
+ 
+USE vidol_billing
+DROP PROCEDURE IF EXISTS handle_new_order_no;
+DELIMITER //
+CREATE PROCEDURE handle_new_order_no(a_now_order_no bigint(20),a_user_no int(11),a_mongo_id varchar(10),a_member_id varchar(6))
+BEGIN
+
+DECLARE CONTINUE HANDLER FOR SQLSTATE '23000' SET @ins_result = 0;
+SET @ins_result = 1;
+#寫入具唯一值的欄位ex order_no_log
+INSERT INTO Order_no_log_tbl( order_sn,user_no,mongo_id,member_id  ) values (a_now_order_no,a_user_no,a_mongo_id,a_member_id);
+IF(@ins_result >0) THEN
+SET @ins_result = 1;
+END IF;
+END//
+DELIMITER ;
+
+
+###############################################################################
+                          測試-test_Billing
+###############################################################################
+
+#檢查取得的order_no是否唯一
+ 
+USE test_Billing
+DROP PROCEDURE IF EXISTS handle_new_order_no;
+DELIMITER //
+CREATE PROCEDURE handle_new_order_no(a_now_order_no bigint(20),a_user_no int(11),a_mongo_id varchar(10),a_member_id varchar(6))
+BEGIN
+
+DECLARE CONTINUE HANDLER FOR SQLSTATE '23000' SET @ins_result = 0;
+SET @ins_result = 1;
+#寫入具唯一值的欄位ex order_no_log
+INSERT INTO Order_no_log_tbl( order_sn,user_no,mongo_id,member_id  ) values (a_now_order_no,a_user_no,a_mongo_id,a_member_id);
+IF(@ins_result >0) THEN
+SET @ins_result = 1;
+END IF;
+END//
+DELIMITER ;
+
+
+###############################################################################
+                          檢驗
+###############################################################################
+
+call handle_new_order_no(1204000025,'jb9A4bcTXF','tSETCL');
+select @ins_result;

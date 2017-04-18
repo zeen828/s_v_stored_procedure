@@ -1,0 +1,829 @@
+
+
+
+###############
+
+#//取得訂單編號 order_no
+
+USE vidol_billing
+DROP PROCEDURE IF EXISTS get_order_no;
+
+DELIMITER //
+Create procedure get_order_no(a_user_no int(11),a_mongo_id varchar(10),a_member_id varchar(6),out result varchar(20))
+BEGIN
+DECLARE s_year_month int(6);
+DECLARE s_now_order_no varchar(20);
+
+SET result = 0;
+
+SELECT DATE_FORMAT( now( ) , '%Y%m' ) INTO s_year_month;
+#需預先建立Order_no_list_tbl 訂單號碼資訊
+IF(SELECT COUNT(*) FROM `Order_no_list_tbl` WHERE o_ym = s_year_month) < 1 THEN
+INSERT INTO `Order_no_list_tbl` (o_ym,o_year,o_month,now_order_no) values (DATE_FORMAT( now( ) , '%Y%m' ), DATE_FORMAT( now( ) , '%Y'),DATE_FORMAT( now( ) , '%m'), 1);
+END IF;
+
+SELECT now_order_no FROM `Order_no_list_tbl` WHERE o_ym = s_year_month INTO s_now_order_no;
+
+
+SELECT CONCAT(unix_timestamp(now()), LPAD(s_now_order_no, 7, '0')) INTO s_now_order_no;
+#確認該order_no是否已被使用
+
+call handle_new_order_no(s_now_order_no,a_user_no,a_mongo_id,a_member_id);
+select @ins_result INTO result;
+
+
+IF (result > 0) THEN
+UPDATE Order_no_list_tbl SET now_order_no = now_order_no +1 WHERE o_ym = s_year_month;
+SET result = LPAD(s_now_order_no, 20, '0');
+END IF;
+
+END//
+DELIMITER ;
+
+#call get_order_no(14,'tyujjsksk','tSETCL',@result);
+#call get_order_no(14,'tyujjsksk','tSETCL',@result);
+call get_order_no(14,'tyujjsksk','tSETCL',@result);
+select @result;
+
+
+###########################################################################
+
+#檢查取得的order_no是否唯一
+ 
+USE vidol_billing
+DROP PROCEDURE IF EXISTS handle_new_order_no;
+DELIMITER //
+CREATE PROCEDURE handle_new_order_no(a_now_order_no bigint(20),a_user_no int(11),a_mongo_id varchar(10),a_member_id varchar(6))
+BEGIN
+
+DECLARE CONTINUE HANDLER FOR SQLSTATE '23000' SET @ins_result = 0;
+SET @ins_result = 1;
+#寫入具唯一值的欄位ex order_no_log
+INSERT INTO Order_no_log_tbl( order_sn,user_no,mongo_id,member_id  ) values (a_now_order_no,a_user_no,a_mongo_id,a_member_id);
+IF(@ins_result >0) THEN
+SET @ins_result = 1;
+END IF;
+END//
+DELIMITER ;
+ 
+ 
+#call handle_new_order_no(1204000025,'jb9A4bcTXF','tSETCL');
+#select @ins_result;
+
+
+###############
+
+###############
+
+#//寫入訂單 insert_order_no
+
+USE vidol_billing
+DROP PROCEDURE IF EXISTS add_order;
+
+DELIMITER //
+Create procedure add_order(a_user_creat int(11),a_user_no int(11),a_mongo_id varchar(10),a_member_id varchar(6),a_package_no int(11),a_payment_no int(11),a_coupon_sn varchar(20),a_invoice_type varchar(10),a_ip varchar(30),out result varchar(40))
+BEGIN
+
+DECLARE s_order_no varchar(20);
+DECLARE s_package_title varchar(100);
+DECLARE s_cost int(10);
+DECLARE s_price int(10);
+DECLARE s_type tinyint(5);
+DECLARE s_unit enum('hour', 'count');
+DECLARE s_unit_value int(10);
+DECLARE s_coupon_no int(11);
+DECLARE s_coupon_title varchar(100);
+DECLARE s_coupon_type varchar(20);
+DECLARE s_coupon_package_no int(11);
+DECLARE s_coupon_discount decimal(5,2);
+DECLARE s_coupon_cash int(10);
+DECLARE s_user_repeat int(10);
+DECLARE s_subtotal int(10);
+DECLARE s_expenses int(10);
+DECLARE s_coupon_check tinyint(1);
+
+SET s_expenses=0;
+SET s_coupon_check=1;
+SET result = CONCAT_WS(',',405,0,0);
+
+IF (SELECT COUNT(*) FROM Sold_packages_tbl WHERE sp_pk = a_package_no AND sp_status = 1)>0 THEN
+#GET package info
+SELECT sp_title,sp_type,sp_cost,sp_price,sp_unit,sp_unit_value FROM Sold_packages_tbl WHERE sp_pk = a_package_no AND sp_status = 1 INTO s_package_title,s_type,s_cost,s_price,s_unit,s_unit_value;
+
+IF (length(a_coupon_sn) > 0) THEN
+#SELECT a_coupon_sn and check c_assign is to user?
+##確認兌換序號的使用者用的是 mongo   or member
+IF (SELECT COUNT(*) FROM Coupon_tbl WHERE c_status = 1 AND c_repeat > 0 AND c_sn = a_coupon_sn AND c_assign = '0' OR c_assign = a_mongo_id)>0 THEN
+SET s_coupon_check=1;
+#GET coupon info
+SELECT c_set_no,c_set_title,c_set_type,c_set_package_no,c_set_discount,c_set_cash,c_user_repeat FROM Coupon_tbl WHERE c_status = 1 AND c_repeat > 0 AND c_sn = a_coupon_sn INTO s_coupon_no,s_coupon_title,s_coupon_type,s_coupon_package_no,s_coupon_discount,s_coupon_cash,s_user_repeat;
+#Check one user re use;
+IF( SELECT COUNT(*) FROM Order_cashs_tbl WHERE oc_mongo_id = a_mongo_id AND oc_coupon_sn = a_coupon_sn ) < s_user_repeat THEN
+
+IF(s_coupon_package_no = 0 or s_coupon_package_no = a_package_no ) THEN 
+
+IF (s_coupon_cash > 0) THEN
+SET s_expenses = s_coupon_cash;
+END IF;
+IF (s_coupon_discount < 1) THEN
+SET s_expenses = s_expenses + FLOOR((s_price-s_expenses) * (1 - s_coupon_discount));
+END IF;
+IF (s_coupon_package_no = a_package_no) THEN
+SET s_expenses = s_price;
+END IF;
+
+ELSE
+SET s_coupon_check=3;
+END IF;
+
+ELSE
+#Check one user re use = use too more;
+SET s_coupon_check=2;
+
+END IF;
+
+ELSE
+SET s_coupon_check=0;
+END IF;
+END IF;
+IF (s_coupon_check = 1 ) THEN
+#GET order no
+call get_order_no(a_user_no,a_mongo_id,a_member_id,@order_no);
+select @order_no INTO s_order_no;
+IF(s_order_no > 0 ) THEN
+
+IF (length(a_coupon_sn) > 0) THEN
+UPDATE Coupon_tbl SET c_repeat = c_repeat - 1 WHERE c_status = 1 AND c_repeat > 0 AND c_sn = a_coupon_sn;
+END IF;
+
+IF (s_price - s_expenses) < 0 THEN
+SET s_subtotal = 0;
+ELSE
+SET s_subtotal = s_price - s_expenses;
+END IF;
+
+#INSERT order
+INSERT INTO  `Orders_tbl` (`o_order_sn` ,`o_user_creat` ,`o_user_no` ,`o_mongo_id` ,`o_member_id` ,`o_package_no` ,`o_package_title` ,`o_package_type`,`o_package_unit`,`o_package_unit_value`,`o_payment_no` ,`o_cost` ,`o_price` ,`o_coupon_no` ,`o_coupon_sn` ,`o_coupon_title` ,`o_expenses` ,`o_subtotal` ,`o_invoice_type` ,`o_status` ,`o_ip`)
+VALUES (
+s_order_no ,  a_user_creat,  a_user_no,  a_mongo_id,  a_member_id,  a_package_no,  s_package_title, s_type, s_unit, s_unit_value, a_payment_no ,  s_cost,  s_price,  s_coupon_no, a_coupon_sn , s_coupon_title , s_expenses ,  s_subtotal,  a_invoice_type , 0 , a_ip
+);
+
+SET result=CONCAT_WS(',',200,s_order_no,s_subtotal);
+
+ELSE
+SET result=CONCAT_WS(',',406,0,0);
+END IF;
+
+ELSEIF (s_coupon_check = 2 ) THEN
+SET result=CONCAT_WS(',',404,0,0);
+ELSEIF (s_coupon_check = 3 ) THEN
+SET result=CONCAT_WS(',',409,0,0);
+ELSE
+SET result=CONCAT_WS(',',401,0,0);
+END IF;
+
+END IF;
+
+END//
+DELIMITER ;
+
+
+#200 訂單成功
+#405 無此商品
+#401 COUPON無法使用
+#406 訂單寫入失敗
+#404 COUPON已使用
+#409 COUPON與商品不符
+#call get_order_no(14,'tSETCL',@result);
+#call get_order_no(14,'tSETCL',@result);
+#add_order(a_user_creat int(11),a_user_no int(11),a_mongo_id varchar(10),a_member_id varchar(6),a_package_no int(11),a_payment_no int(11),a_coupon_sn varchar(20),a_invoice_type varchar(10),a_ip varchar(30),out result varchar(20))
+
+使用序號 成功
+call add_order(0,0,'jb9A4bcTXF','tSETCL',11,1,'1JQG6LBRURO3HKFX',1,'127.0.0.1',@result);
+select @result;
+
+不使用序號
+call add_order(0,0,'jb9A4bcTXF','tSETCL',11,1,'',1,'127.0.0.1',@result);
+select @result;
+
+call add_order(0,0,'jb9A4bcTXF','tSETCL',11,1,'',1,'127.0.0.1',@result);
+select @result;
+  #購買單次
+call add_order(0,0,'jb9A4bcTXF','tSETCL',36,1,'',1,'127.0.0.1',@result);
+select @result;
+
+序號錯誤 
+call add_order(0,0,'jb9A4bcTXF','tSETCL',11,1,'EQ5VNDHsZ',1,'127.0.0.1',@result);
+select @result;
+
+序號折抵金額
+call add_order(0,0,'jb9A4bcTXF','tSETCL',11,1,'UR3DVTM12UD5ZGK8L4IY',1,'127.0.0.1',@result);
+select @result;
+
+序號折扣
+call add_order(0,0,'jb9A4bcTXF','tSETCL',12,1,'8LLX1YNJUVWMTRFT',1,'127.0.0.1',@result);
+select @result;
+
+call add_order(0,0,'jb9A4bcTXF','tSETCL',11,1,'HIIN9WZDQMS1LNZB',1,'127.0.0.1',@result);
+select @result;
+
++----------------------------+
+| @result                    |
++----------------------------+
+| 200,00014781542170000022,0 |
++----------------------------+
+#回應碼,訂單編號,金額
+
+###########################################################################
+###############
+#確認兌換序號的使用者用的是 mongo   or member
+#//序號兌換 package
+
+USE vidol_billing
+DROP PROCEDURE IF EXISTS exchange_SN;
+
+DELIMITER //
+Create procedure exchange_SN(a_user_creat int(11),a_user_no int(11),a_mongo_id varchar(10),a_member_id varchar(6),a_coupon_sn varchar(20),a_ip varchar(30),out result varchar(40))
+BEGIN
+
+DECLARE s_coupon_package_no int(11);
+SET result = CONCAT_WS(',',401,0,0);
+
+IF (length(a_coupon_sn) > 0) THEN
+##確認兌換序號的使用者用的是 mongo   or member
+IF (SELECT COUNT(*) FROM Coupon_tbl WHERE c_status = 1 AND c_repeat > 0 AND c_sn = a_coupon_sn AND c_set_package_no > 0 AND c_assign = '0' OR c_assign = a_mongo_id)>0 THEN
+#GET coupon info
+SELECT c_set_package_no FROM Coupon_tbl WHERE c_status = 1 AND c_repeat > 0 AND c_sn = a_coupon_sn INTO s_coupon_package_no;
+
+#exchange_SN payment_no = 0, invoice_type=0
+call add_order(a_user_creat,a_user_no,a_mongo_id,a_member_id,s_coupon_package_no,0,a_coupon_sn,0,a_ip,@add_order_result);
+select @add_order_result into result;
+
+END IF;
+END IF;
+
+END//
+DELIMITER ;
+
+
+#200 訂單成功
+#405 無此商品
+#401 COUPON無法使用
+#404 COUPON已使用
+#call exchange_SN(a_user_creat int(11),a_user_no int(11),a_mongo_id varchar(10),a_member_id varchar(6),a_coupon_sn varchar(20),a_ip varchar(30),out result varchar(40))
+
+call exchange_SN(0,0,'jb9A4bcTXF','tSETCL','XFZYENABUPCSBGSR','127.0.0.1',@result);
+select @result;
+
++----------------------------+
+| @result                    |
++----------------------------+
+| 200,00014781542170000022,0 |
++----------------------------+
+#回應碼,訂單編號,金額
+
+###########################################################################################
+
+#//新增發票 
+
+USE vidol_billing
+DROP PROCEDURE IF EXISTS add_invoice;
+
+DELIMITER //
+Create procedure add_invoice(a_MerchantOrderNo varchar(20),a_TransNum varchar(30),a_invoice_type tinyint(2),a_BuyerName varchar(50),a_BuyerUBN varchar(8),a_BuyerPhone varchar(15),a_BuyerAddress varchar(100),a_BuyerEmail varchar(50),a_LoveCode varchar(10),a_ItemName varchar(30),a_ItemPrice int(10),a_Comment varchar(71),out result varchar(40))
+BEGIN
+
+DECLARE s_Category enum('B2B', 'B2C');
+DECLARE s_CreateStatusTime varchar(10);
+DECLARE s_CarrierType varchar(2);
+DECLARE s_CarrierNum varchar(50);
+DECLARE s_LoveCode varchar(10);
+DECLARE s_PrintFlag varchar(1);
+DECLARE s_Amt int(10);
+DECLARE s_TaxAmt int(10);
+DECLARE result_tmp varchar(10);
+DECLARE CONTINUE HANDLER FOR SQLSTATE '23000' SET result = 404;
+SET result_tmp = 200;
+#發票類型(1:電子發票用vidol載具,2:捐贈發票,3:索取三連發票)
+CASE a_invoice_type
+WHEN 1 THEN SET s_Category = 'B2C',s_CarrierType=2,s_CarrierNum=a_BuyerPhone,s_LoveCode='',s_PrintFlag='N';
+WHEN 2 THEN SET s_Category = 'B2C',s_CarrierType='',s_CarrierNum='',s_LoveCode=a_LoveCode,s_PrintFlag='N';
+WHEN 3 THEN SET s_Category = 'B2B',s_CarrierType='',s_CarrierNum='',s_LoveCode='',s_PrintFlag='Y';
+ELSE SET result_tmp = 404;
+END CASE;
+IF (s_Category = 'B2B') THEN
+IF (length(a_BuyerUBN) = 8) THEN
+SET result_tmp = 200;
+ELSE
+SET result_tmp = 411;
+END IF;
+END IF;
+
+IF (result_tmp = 200 ) THEN
+
+SELECT date_add(DATE_FORMAT(NOW(), '%Y-%m-%d'),interval 7 day) INTO s_CreateStatusTime;
+SET s_Amt= CEILING(a_ItemPrice /1.05);
+SET s_TaxAmt = a_ItemPrice - s_Amt;
+
+SET result = 200;
+INSERT INTO `Pay2goInvoice_tbl` (`RespondType`, `Version`, `TimeStamp`,`TransNum`, `MerchantOrderNo`, `Status`, `CreateStatusTime`, `Category`, `BuyerName`, `BuyerUBN`, `BuyerPhone`, `BuyerAddress`, `BuyerEmail`, `CarrierType`, `CarrierNum`, `LoveCode`, `PrintFlag`, `TaxType`, `TaxRate`, `Amt`, `TaxAmt`, `TotalAmt`, `ItemName`, `ItemCount`, `ItemUnit`, `ItemPrice`, `ItemAmt`, `Comment`) VALUES ('JSON', '1.3', unix_timestamp(now()), a_TransNum, a_MerchantOrderNo, '3', s_CreateStatusTime, s_Category, a_BuyerName, a_BuyerUBN, a_BuyerPhone, a_BuyerAddress, a_BuyerEmail, s_CarrierType, s_CarrierNum, s_LoveCode, s_PrintFlag, '1', 5, s_Amt, s_TaxAmt, a_ItemPrice, a_ItemName, 1, '個', a_ItemPrice, a_ItemPrice, a_Comment);
+
+ELSE
+SET result = result_tmp;
+
+END IF;
+
+END//
+DELIMITER ;
+
+#//新增發票 
+#200 發票開立成功
+#404 發票開立失敗
+#411 統編長度錯誤
+
+#call add_invoice(a_MerchantOrderNo varchar(20),a_TransNum varchar(30),a_invoice_type tinyint(2),a_BuyerName varchar(50),a_BuyerUBN varchar(8),a_BuyerPhone varchar(15),a_BuyerAddress varchar(100),a_BuyerEmail varchar(50),a_LoveCode varchar(10),a_ItemName varchar(30),a_ItemPrice int(10),a_Comment varchar(71))
+
+#個人電子發票
+call add_invoice('00014786643780000257','16110314305375721',1,'黃亦銘','','0919276787','台北內湖','cougar1228@gmail.com','','169元 / 30天',127,'a_Comment',@result);
+select @result;
+
+#使用愛心碼
+call add_invoice('00014782490870000037','16110314305375721',2,'亦銘','','0919276787','台北內湖','cougar1228@gmail.com','LoveCode','169元 / 30天',169,'a_Comment',@result);
+select @result;
+
+#使用三聯式
+call add_invoice('00014781541040000023','16110314305375721',3,'三立電視股份有限公司','23740512','0919276787','台北內湖','cougar1228@gmail.com','','特惠價1690元 / 365天',501,'a_Comment',@result);
+select @result;
+
++---------+
+| @result |
++---------+
+|     200 |
++---------+
+#回應碼
+
+###########################################################################################
+
+###############
+
+#//訂單成立 
+
+USE vidol_billing
+DROP PROCEDURE IF EXISTS add_to_cash;
+
+DELIMITER //
+Create procedure add_to_cash(a_order_sn varchar(20),a_trade_no varchar(20),a_rs tinyint(1),a_TokenUseStatus int(1),a_TokenValue varchar(70),a_TokenLife date,out result varchar(40))
+BEGIN
+
+DECLARE s_package_no int(11);
+DECLARE s_user_no int(11);
+DECLARE s_mongo_id varchar(10); 
+DECLARE s_member_id varchar(6);
+DECLARE s_type tinyint(5);
+DECLARE s_unit enum('hour', 'count');
+DECLARE s_unit_value int(10);
+DECLARE s_subtotal  int(10);
+DECLARE s_time_active timestamp;
+DECLARE s_time_deadline timestamp;
+DECLARE result_tmp varchar(6);
+DECLARE CONTINUE HANDLER FOR SQLSTATE '23000' SET result = 500;
+SET result_tmp = 200;
+SET result = 401;
+
+IF(SELECT COUNT(*) FROM `Orders_tbl` WHERE o_status = 0 AND o_order_sn = a_order_sn ) > 0 THEN
+
+SELECT o_package_no,o_user_no,	o_mongo_id,o_member_id,o_package_type,o_package_unit,o_package_unit_value,o_subtotal FROM `Orders_tbl` WHERE o_order_sn = a_order_sn INTO s_package_no,s_user_no,s_mongo_id,s_member_id,s_type,s_unit,s_unit_value,s_subtotal;
+
+#判斷是否有相同package type要累加
+IF (SELECT COUNT(*) FROM `Order_cashs_tbl` WHERE oc_time_deadline > NOW() AND oc_status = 1 AND oc_active_status = 1 AND oc_package_type = s_type AND oc_mongo_id = s_mongo_id) > 0 THEN
+SELECT oc_time_deadline FROM `Order_cashs_tbl` WHERE oc_time_deadline > NOW()  AND oc_status = 1 AND oc_active_status = 1 AND oc_package_type = s_type AND oc_mongo_id = s_mongo_id ORDER BY oc_time_deadline DESC LIMIT 1 INTO s_time_active ;
+ELSE
+SET s_time_active = NOW();
+END IF;
+
+
+#package類型('hour', 'count')
+CASE s_unit
+WHEN 'hour' THEN SELECT date_add(s_time_active,interval s_unit_value hour) INTO s_time_deadline; 
+WHEN 'count' THEN SET s_time_deadline = '2037-12-31 00:00:00',s_time_active = NOW();
+ELSE SET result_tmp = 404;
+END CASE;
+
+IF (result_tmp = 200) THEN
+
+SET result = 200;
+INSERT INTO `vidol_billing`.`Order_cashs_tbl` (`oc_order_sn`,`oc_trade_no`, `oc_user_creat`, `oc_user_no`, `oc_mongo_id`, `oc_member_id`, `oc_package_no`, `oc_package_title`,`oc_package_type`,`oc_package_unit`, `oc_package_unit_value`,`oc_payment_no`, `oc_cost`, `oc_price`, `oc_coupon_no`, `oc_coupon_sn`, `oc_coupon_title`, `oc_expenses`, `oc_subtotal`, `oc_rs`, `oc_invoice_type`, `oc_invoice`, `oc_status`, `oc_active_status`,`oc_time_paytime`,`oc_time_active`,`oc_time_deadline`, `oc_ip`,`oc_TokenUseStatus`,`oc_TokenValue`,`oc_TokenLife`) SELECT `o_order_sn`, a_trade_no, `o_user_creat`, `o_user_no`, `o_mongo_id`, `o_member_id`, `o_package_no`, `o_package_title`,`o_package_type`,`o_package_unit`,`o_package_unit_value`, `o_payment_no`, `o_cost`, `o_price`, `o_coupon_no`, `o_coupon_sn`, `o_coupon_title`, `o_expenses`, `o_subtotal`, a_rs, `o_invoice_type`, `o_invoice`,  1 , 1 , NOW() , s_time_active, s_time_deadline , `o_ip` ,a_TokenUseStatus,a_TokenValue,a_TokenLife FROM `Orders_tbl` WHERE o_order_sn = a_order_sn;
+UPDATE Orders_tbl SET o_status = 1 , o_rs = a_rs ,o_time_active = s_time_active , o_time_deadline = s_time_deadline  WHERE o_order_sn = a_order_sn;
+
+UPDATE Pay2goInvoice_tbl SET TransNum = a_trade_no , pi_order_status = 1 WHERE MerchantOrderNo = a_order_sn;
+
+
+IF(SELECT COUNT(*) FROM Account_accumulation_tbl WHERE a_member_id = s_member_id ) > 0 THEN
+UPDATE Account_accumulation_tbl SET a_amount = a_amount + s_subtotal,a_time_last = now() WHERE a_member_id = s_member_id;
+ELSE
+INSERT INTO Account_accumulation_tbl (`a_user_no`,`	a_mongo_id`,`a_member_id`,`a_amount`,`a_time_last`) VALUES (s_user_no,s_mongo_id,s_member_id,s_subtotal,now());
+END IF;
+
+ELSE
+SET result = 401;
+END IF;
+
+ELSE
+SET result = 404;
+END IF;
+
+END//
+DELIMITER ;
+
+
+#200 付費成功
+#404 訂單不存在
+#401 package類型錯誤
+#500 訂單號碼重複寫入
+
+#call add_to_cash(a_order_sn varchar(20),a_trade_no varchar(20),a_rs tinyint(1),a_TokenUseStatus int(1),a_TokenValue varchar(70),a_TokenLife timestamp,out result varchar(40))
+
+call add_to_cash('00014786643780000257','1235542',0,0,'','',@result);
+select @result;
+
+call add_to_cash('00014785090580000132','1235543',1,1,'WHIUIUGDWOPHI','2018-11-12',@result);
+select @result;
+
+call add_to_cash('00014782497200000038','1235543',0,0,'','',@result);
+select @result;
+
+
+call add_to_cash('00014782460240000035','1235548',0,1,'WHIUIUGDWOPHI','2018-11-12',@result);
+select @result;
+
+call add_to_cash('00014784888310000119','1235542',1,0,'','',@result);
+select @result;
+
+
+
+
+
++---------+
+| @result |
++---------+
+| 200     |
++---------+
+#回應碼
+
+################################################################
+
+#/訂單失敗 
+
+USE vidol_billing
+DROP PROCEDURE IF EXISTS add_to_cancel_cash;
+
+DELIMITER //
+Create procedure add_to_cancel_cash(a_order_sn varchar(20),a_status tinyint(1),a_refund int(10),a_note varchar(255),out result varchar(40))
+BEGIN
+
+DECLARE s_package_no int(11);
+DECLARE s_user_no int(11);
+DECLARE s_mongo_id varchar(10); 
+DECLARE s_member_id varchar(6);
+DECLARE s_type tinyint(5);
+DECLARE s_unit enum('hour', 'count');
+DECLARE s_unit_value int(10);
+DECLARE s_subtotal  int(10);
+DECLARE s_oc_order_sn bigint(20);
+DECLARE s_time_active timestamp;
+DECLARE s_time_deadline timestamp;
+DECLARE st_time_active timestamp;
+DECLARE st_time_deadline timestamp;
+
+SET result = 401;
+
+
+IF (a_status = 2) THEN
+
+IF (SELECT COUNT(*) FROM `Order_cashs_tbl` WHERE  oc_order_sn = a_order_sn AND oc_status =1 AND oc_active_status = 1 ) > 0 THEN
+
+SELECT oc_package_no,oc_user_no,	oc_mongo_id,oc_member_id,oc_package_type,oc_package_unit,oc_package_unit_value,oc_subtotal,oc_time_active,oc_time_deadline  FROM `Order_cashs_tbl` WHERE oc_order_sn = a_order_sn INTO s_package_no,s_user_no,s_mongo_id,s_member_id,s_type,s_unit,s_unit_value,s_subtotal,s_time_active,s_time_deadline;
+
+IF(s_subtotal-a_refund) > -1 THEN
+
+UPDATE Order_cashs_tbl SET oc_status = a_status,oc_active_status=0,oc_refund = a_refund,oc_subtotal=oc_subtotal - a_refund,oc_note = a_note  WHERE oc_order_sn = a_order_sn;
+UPDATE Orders_tbl SET o_status = a_status WHERE o_order_sn = a_order_sn;
+UPDATE Pay2goInvoice_tbl SET pi_order_status = a_status, Comment = a_note WHERE MerchantOrderNo = a_order_sn;
+
+#package類型('hour', 'count')
+IF (s_unit='hour') THEN
+DROP TABLE IF EXISTS TOrder_cashs_tbl;
+CREATE TEMPORARY TABLE TOrder_cashs_tbl (t_oc_order_sn bigint(20),t_oc_package_type tinyint(5),t_oc_time_active timestamp,t_oc_time_deadline timestamp);
+
+INSERT INTO TOrder_cashs_tbl (t_oc_order_sn,t_oc_package_type,t_oc_time_active,t_oc_time_deadline) SELECT oc_order_sn,oc_package_type,oc_time_active,oc_time_deadline FROM vidol_billing.`Order_cashs_tbl` WHERE oc_time_active > s_time_active AND oc_status = 1 AND oc_active_status = 1 AND oc_package_type = s_type AND oc_mongo_id = s_mongo_id ORDER BY oc_time_active ASC;
+
+#SELECT * FROM TOrder_cashs_tbl;
+WHILE(SELECT COUNT(*) FROM TOrder_cashs_tbl )> 0 DO
+SELECT t_oc_order_sn,t_oc_time_active,t_oc_time_deadline FROM TOrder_cashs_tbl ORDER BY t_oc_time_active ASC LIMIT 1 into s_oc_order_sn,st_time_active,st_time_deadline;
+
+UPDATE Order_cashs_tbl SET oc_time_active = s_time_active,oc_time_deadline=s_time_deadline WHERE oc_order_sn =s_oc_order_sn;
+SET s_time_active = st_time_active, s_time_deadline= st_time_deadline;
+DELETE FROM TOrder_cashs_tbl WHERE t_oc_order_sn=s_oc_order_sn;
+END WHILE;
+DROP TABLE IF EXISTS TOrder_cashs_tbl;
+END IF;
+
+SET result = 200;
+ELSE
+SET result = 500;
+END IF;
+
+ELSE
+
+SET result = 405;
+
+END IF;
+
+ELSE
+#o_status = -1
+#o_status = 3
+UPDATE Orders_tbl SET o_status = a_status,o_note = a_note WHERE o_order_sn = a_order_sn;
+UPDATE Pay2goInvoice_tbl SET pi_order_status = a_status, Comment = a_note WHERE MerchantOrderNo = a_order_sn;
+
+SET result = 200;
+END IF;
+
+
+END//
+DELIMITER ;
+
+
+#200 付費成功
+#405 訂單號碼不存在
+#500 退款金額錯誤
+
+#call add_to_cancel_cash(a_order_sn varchar(20),a_status tinyint(1),a_refund int(10),a_note varchar(255),out result varchar(40))
+
+call add_to_cancel_cash('00014785218440000168',2,20,'退款20元',@result);
+select @result;
+
+call add_to_cancel_cash('00014794650160000328',2,0,NULL,@result);
+select @result;
+
+
+###########################################################################################
+
+#//判別使用者是否可觀看影片 check rights 
+
+USE vidol_billing
+DROP PROCEDURE IF EXISTS check_rights;
+
+DELIMITER //
+Create procedure check_rights(a_user_no int(11),a_mongo_id varchar(10),a_member_id varchar(6),a_si_type varchar(20),a_type_video_no int(11),out result varchar(40))
+BEGIN
+
+DECLARE s_package_no_list varchar(255);
+DECLARE s_COUNT tinyint(5);
+DECLARE s_type tinyint(5);
+
+SET result=0;
+
+#SELECT GROUP_CONCAT(DISTINCT si_package_no) FROM Sold_items_tbl WHERE si_status= 1 AND si_type = a_si_type AND si_type_video_no = a_type_video_no GROUP BY si_type_video_no INTO s_package_no_list;
+#SELECT DISTINCT si_package_no FROM Sold_items_tbl WHERE si_status= 1 AND si_type = a_si_type AND si_type_video_no = a_type_video_no LIMIT 2,1 INTO s_package_no_list;
+#SELECT s_package_no_list;
+#SELECT COUNT(*) FROM Order_cashs_tbl WHERE oc_status = 1 AND oc_user_no = a_user_no AND oc_mongo_id = a_mongo_id AND oc_member_id = a_member_id AND oc_package_no IN (s_package_no_list) AND  NOW() BETWEEN oc_time_active AND oc_time_deadline INTO result;
+
+#SELECT COUNT(*) FROM Order_cashs_tbl WHERE oc_status = 1 AND oc_user_no = a_user_no AND oc_mongo_id = a_mongo_id AND oc_member_id = a_member_id AND oc_package_no IN (SELECT DISTINCT si_package_no FROM Sold_items_tbl WHERE si_status= 1 AND si_type = a_si_type AND si_type_video_no = a_type_video_no) AND  NOW() BETWEEN oc_time_active AND oc_time_deadline INTO result;
+#SELECT a_mongo_id;
+#SELECT oc_time_active,oc_time_deadline FROM Order_cashs_tbl WHERE oc_status = 1 AND oc_mongo_id = a_mongo_id;
+#SELECT COUNT(*) FROM Order_cashs_tbl WHERE oc_status = 1 AND oc_mongo_id = a_mongo_id AND  NOW() BETWEEN oc_time_active AND oc_time_deadline;
+SELECT COUNT(*) FROM Order_cashs_tbl WHERE oc_status = 1 AND oc_mongo_id = a_mongo_id AND oc_package_no IN (SELECT DISTINCT si_package_no FROM Sold_items_tbl WHERE si_status= 1 AND si_type = a_si_type AND si_type_video_no = a_type_video_no) AND  NOW() BETWEEN oc_time_active AND oc_time_deadline INTO result;
+IF(result > 0) THEN
+SET result=1;
+END IF;
+
+END//
+DELIMITER ;
+
+
+#1 可觀看
+#0 不可觀看
+
+#call check_rights(a_user_no int(11),a_mongo_id varchar(10),a_member_id varchar(6),a_si_type varchar(20),a_type_video_no int(11),out result varchar(40))
+call check_rights(0,'jb9A4bcTXF','tSETCL','episode',131,@result);
+
+call check_rights(0,'qscesz1234','abcdef','episode',2482,@result);
+
+call check_rights(0,'ZzfVupenHQ','','episode',2482,@result);
+select @result;
+ZzfVupenHQ
+
+SELECT COUNT(*) FROM Order_cashs_tbl WHERE oc_status = 1 AND oc_mongo_id = 'ZzfVupenHQ' AND oc_package_no IN (14);
+
+###########################################################################
+
+
+SELECT 1 WHERE NOW() BETWEEN '2016-11-17' AND '2016-11-19';
+
+###############################
+
+##############################
+###############################
+################################
+#建置一個loop跑資料轉換
+
+USE vidol_billing
+DROP PROCEDURE IF EXISTS evolve_loop;
+
+DELIMITER //
+Create procedure evolve_loop(out result varchar(20))
+BEGIN
+
+SET result=0;
+
+WHILE(SELECT COUNT(A.o_order_sn) FROM `Orders_tbl` A, `Sold_packages_tbl` B WHERE A.o_cost = 0 AND A.o_package_no = B.sp_pk)> 0 DO
+SELECT COUNT(A.o_order_sn) FROM `Orders_tbl` A, `Sold_packages_tbl` B WHERE A.o_cost = 0 AND A.o_package_no = B.sp_pk;
+
+
+call evolve_data(@result);
+select @result;
+SELECT SLEEP(10);
+
+END WHILE;
+SELECT 1;
+SET result=1;
+
+END//
+DELIMITER ;
+
+
+call evolve_loop(@result);
+select @result;
+
+
+
+
+###################################
+
+
+## reset  # UPDATE Orders_tbl SET o_cost = 0;
+
+
+#//轉換舊資料  
+
+USE vidol_billing
+DROP PROCEDURE IF EXISTS evolve_data;
+
+DELIMITER //
+Create procedure evolve_data(out result varchar(20))
+BEGIN
+
+DECLARE s_o_order_sn bigint(20);
+DECLARE s_o_package_no int(11);
+DECLARE s_o_package_type tinyint(5);
+DECLARE s_o_package_unit varchar(20);
+DECLARE s_o_package_unit_value int(10);
+DECLARE s_o_cost int(10);
+DECLARE s_o_price int(10);
+
+
+SET result=0;
+
+DROP TABLE IF EXISTS Tevolve_Order_tbl;
+CREATE TEMPORARY TABLE Tevolve_Order_tbl (t_o_order_sn bigint(20),t_o_package_no int(11),t_o_package_type tinyint(5), t_o_package_unit varchar(20),t_o_package_unit_value int(10),t_o_cost int(10),t_o_price int(10));
+
+INSERT INTO Tevolve_Order_tbl SELECT A.o_order_sn,A.o_package_no,B.sp_type,B.sp_unit,B.sp_unit_value,B.sp_cost,B.sp_price FROM `Orders_tbl` A, `Sold_packages_tbl` B WHERE A.o_cost = 0 AND A.o_package_no = B.sp_pk LIMIT 1000;
+
+
+SELECT * FROM Tevolve_Order_tbl LIMIT 10;
+WHILE(SELECT COUNT(*) FROM Tevolve_Order_tbl )> 0 DO
+SELECT t_o_order_sn,t_o_package_no,t_o_package_type,t_o_package_unit,t_o_package_unit_value,t_o_cost,t_o_price FROM Tevolve_Order_tbl LIMIT 1 INTO s_o_order_sn,s_o_package_no,s_o_package_type,s_o_package_unit,s_o_package_unit_value,s_o_cost,s_o_price;
+
+
+UPDATE `Orders_tbl` SET o_package_type = s_o_package_type, o_package_unit = s_o_package_unit, o_package_unit_value = s_o_package_unit_value, o_cost = s_o_cost,o_price = s_o_price ,o_subtotal = s_o_price, o_note ='舊訂單' WHERE o_order_sn = s_o_order_sn ;
+
+DELETE FROM Tevolve_Order_tbl WHERE t_o_order_sn = s_o_order_sn ;
+
+END WHILE;
+
+SET result=1;
+
+END//
+DELIMITER ;
+
+
+#1 完成
+#0 未完成
+
+#call evolve_data(out result varchar(20))
+call evolve_data(@result);
+select @result;
+
+#####
+
+
+#建置一個loop跑資料轉換 cash
+
+USE vidol_billing
+DROP PROCEDURE IF EXISTS evolve_loop_cash;
+
+DELIMITER //
+Create procedure evolve_loop_cash(out result varchar(20))
+BEGIN
+
+SET result=0;
+
+UPDATE Order_cashs_tbl SET oc_subtotal = oc_price WHERE oc_price > 0 AND oc_subtotal = 0 AND oc_time_deadline is NULL;
+
+UPDATE Order_cashs_tbl SET oc_time_paytime = oc_time_creat WHERE oc_time_paytime is NULL;
+
+
+WHILE(SELECT COUNT(A.oc_order_sn) FROM `Order_cashs_tbl` A, `Sold_packages_tbl` B WHERE A.oc_cost = 0 AND A.oc_package_no = B.sp_pk)> 0 DO
+SELECT COUNT(A.oc_order_sn) FROM `Order_cashs_tbl` A, `Sold_packages_tbl` B WHERE A.oc_cost = 0 AND A.oc_package_no = B.sp_pk;
+call evolve_data_cash(@result);
+select @result;
+SELECT SLEEP(10);
+
+END WHILE;
+SELECT 1;
+SET result=1;
+
+END//
+DELIMITER ;
+
+
+call evolve_loop_cash(@result);
+select @result;
+
+
+
+
+###################################
+#################################
+
+
+## reset  # UPDATE Order_cashs_tbl SET oc_cost = 0;
+
+#UPDATE Order_cashs_tbl SET oc_subtotal = oc_price;
+#UPDATE Order_cashs_tbl SET oc_time_paytime = oc_time_creat;
+
+#//轉換舊資料 for cash  
+
+USE vidol_billing
+DROP PROCEDURE IF EXISTS evolve_data_cash;
+
+DELIMITER //
+Create procedure evolve_data_cash(out result varchar(20))
+BEGIN
+
+DECLARE s_oc_order_sn bigint(20);
+DECLARE s_oc_package_no int(11);
+DECLARE s_oc_package_type tinyint(5);
+DECLARE s_oc_package_unit varchar(20);
+DECLARE s_oc_package_unit_value int(10);
+DECLARE s_oc_cost int(10);
+DECLARE s_oc_price int(10);
+DECLARE s_oc_subtotal int(10);
+DECLARE s_time_active timestamp;
+DECLARE s_time_deadline timestamp;
+
+SET result=0;
+
+DROP TABLE IF EXISTS Tevolve_Order_cashs_tbl;
+CREATE TEMPORARY TABLE Tevolve_Order_cashs_tbl (t_oc_order_sn bigint(20),t_oc_package_no int(11),t_oc_package_type tinyint(5), t_oc_package_unit varchar(20),t_oc_package_unit_value int(10),t_oc_cost int(10),t_oc_price int(10),t_oc_subtotal int(10),t_oc_time_paytime timestamp);
+
+INSERT INTO Tevolve_Order_cashs_tbl SELECT A.oc_order_sn,A.oc_package_no,B.sp_type,B.sp_unit,B.sp_unit_value,B.sp_cost,B.sp_price, A.oc_subtotal , A.oc_time_paytime FROM `Order_cashs_tbl` A, `Sold_packages_tbl` B WHERE A.oc_cost = 0 AND A.oc_package_no = B.sp_pk LIMIT 1000;
+
+
+SELECT * FROM Tevolve_Order_cashs_tbl LIMIT 10;
+WHILE(SELECT COUNT(*) FROM Tevolve_Order_cashs_tbl )> 0 DO
+SELECT t_oc_order_sn,t_oc_package_no,t_oc_package_type,t_oc_package_unit,t_oc_package_unit_value,t_oc_cost,t_oc_price,t_oc_subtotal,t_oc_time_paytime FROM Tevolve_Order_cashs_tbl LIMIT 1 INTO s_oc_order_sn,s_oc_package_no,s_oc_package_type,s_oc_package_unit,s_oc_package_unit_value,s_oc_cost,s_oc_price,s_oc_subtotal,s_time_active;
+
+#package類型('hour', 'count')
+CASE s_oc_package_unit
+WHEN 'hour' THEN SELECT date_add(s_time_active,interval s_oc_package_unit_value hour) INTO s_time_deadline; 
+WHEN 'count' THEN SET s_time_deadline = '2037-12-31 00:00:00';
+ELSE SET s_time_deadline = NULL;
+END CASE;
+
+#SELECT s_oc_order_sn,s_oc_package_no,s_oc_package_type,s_oc_package_unit,s_oc_package_unit_value,s_oc_cost,s_oc_price,s_time_active;
+
+UPDATE `Order_cashs_tbl` SET oc_package_type = s_oc_package_type, oc_package_unit = s_oc_package_unit, oc_package_unit_value = s_oc_package_unit_value, oc_cost = s_oc_cost,oc_price = s_oc_price , oc_time_active = s_time_active , oc_time_deadline = s_time_deadline , oc_note = '舊已完成訂單' WHERE oc_order_sn = s_oc_order_sn ;
+
+UPDATE `Orders_tbl` SET o_subtotal = s_oc_subtotal , o_time_active = s_time_active , o_time_deadline = s_time_deadline, o_note ='舊已完成訂單' WHERE o_order_sn = s_oc_order_sn ;
+
+DELETE FROM Tevolve_Order_cashs_tbl WHERE t_oc_order_sn = s_oc_order_sn ;
+
+END WHILE;
+
+SET result=1;
+
+END//
+DELIMITER ;
+
+
+#1 完成
+#0 未完成
+
+#call evolve_data_cash(out result varchar(20))
+call evolve_data_cash(@result);
+select @result;
+
+
+
+

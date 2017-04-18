@@ -1,0 +1,90 @@
+﻿###############################################################################
+                          正式-vidol_billing
+###############################################################################
+
+#//取得訂單編號 order_no
+
+USE vidol_billing
+DROP PROCEDURE IF EXISTS get_order_no;
+
+DELIMITER //
+Create procedure get_order_no(a_user_no int(11),a_mongo_id varchar(10),a_member_id varchar(6),out result varchar(20))
+BEGIN
+DECLARE s_year_month int(6);
+DECLARE s_now_order_no varchar(20);
+
+SET result = 0;
+
+SELECT DATE_FORMAT( now( ) , '%Y%m' ) INTO s_year_month;
+#需預先建立Order_no_list_tbl 訂單號碼資訊
+IF(SELECT COUNT(*) FROM `Order_no_list_tbl` WHERE o_ym = s_year_month) < 1 THEN
+INSERT INTO `Order_no_list_tbl` (o_ym,o_year,o_month,now_order_no) values (DATE_FORMAT( now( ) , '%Y%m' ), DATE_FORMAT( now( ) , '%Y'),DATE_FORMAT( now( ) , '%m'), 1);
+END IF;
+
+SELECT now_order_no FROM `Order_no_list_tbl` WHERE o_ym = s_year_month INTO s_now_order_no;
+
+
+SELECT CONCAT(unix_timestamp(now()), LPAD(s_now_order_no, 7, '0')) INTO s_now_order_no;
+#確認該order_no是否已被使用
+
+call handle_new_order_no(s_now_order_no,a_user_no,a_mongo_id,a_member_id);
+select @ins_result INTO result;
+
+
+IF (result > 0) THEN
+UPDATE Order_no_list_tbl SET now_order_no = now_order_no +1 WHERE o_ym = s_year_month;
+SET result = LPAD(s_now_order_no, 20, '0');
+END IF;
+
+END//
+DELIMITER ;
+
+
+###############################################################################
+                          測試-test_Billing
+###############################################################################
+
+#//取得訂單編號 order_no
+
+USE test_Billing
+DROP PROCEDURE IF EXISTS get_order_no;
+
+DELIMITER //
+Create procedure get_order_no(a_user_no int(11),a_mongo_id varchar(10),a_member_id varchar(6),out result varchar(20))
+BEGIN
+DECLARE s_year_month int(6);
+DECLARE s_now_order_no varchar(20);
+
+SET result = 0;
+
+SELECT DATE_FORMAT( now( ) , '%Y%m' ) INTO s_year_month;
+#需預先建立Order_no_list_tbl 訂單號碼資訊
+IF(SELECT COUNT(*) FROM `Order_no_list_tbl` WHERE o_ym = s_year_month) < 1 THEN
+INSERT INTO `Order_no_list_tbl` (o_ym,o_year,o_month,now_order_no) values (DATE_FORMAT( now( ) , '%Y%m' ), DATE_FORMAT( now( ) , '%Y'),DATE_FORMAT( now( ) , '%m'), 1);
+END IF;
+
+SELECT now_order_no FROM `Order_no_list_tbl` WHERE o_ym = s_year_month INTO s_now_order_no;
+
+
+SELECT CONCAT(unix_timestamp(now()), LPAD(s_now_order_no, 7, '0')) INTO s_now_order_no;
+#確認該order_no是否已被使用
+
+call handle_new_order_no(s_now_order_no,a_user_no,a_mongo_id,a_member_id);
+select @ins_result INTO result;
+
+
+IF (result > 0) THEN
+UPDATE Order_no_list_tbl SET now_order_no = now_order_no +1 WHERE o_ym = s_year_month;
+SET result = LPAD(s_now_order_no, 20, '0');
+END IF;
+
+END//
+DELIMITER ;
+
+
+###############################################################################
+                          檢驗
+###############################################################################
+
+call get_order_no(14,'tyujjsksk','tSETCL',@result);
+select @result;

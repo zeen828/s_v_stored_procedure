@@ -1,0 +1,91 @@
+﻿###############################################################################
+                          正式-vidol_billing
+###############################################################################
+
+#//判別使用者是否可觀看影片 check rights 
+
+USE vidol_billing
+DROP PROCEDURE IF EXISTS check_rights;
+
+DELIMITER //
+Create procedure check_rights(a_user_no int(11),a_mongo_id varchar(10),a_member_id varchar(6),a_si_type varchar(20),a_type_video_no int(11),out result varchar(40))
+BEGIN
+
+DECLARE s_package_no_list varchar(255);
+DECLARE s_COUNT tinyint(5);
+DECLARE s_type tinyint(5);
+
+SET result=0;
+
+#SELECT GROUP_CONCAT(DISTINCT si_package_no) FROM Sold_items_tbl WHERE si_status= 1 AND si_type = a_si_type AND si_type_video_no = a_type_video_no GROUP BY si_type_video_no INTO s_package_no_list;
+#SELECT DISTINCT si_package_no FROM Sold_items_tbl WHERE si_status= 1 AND si_type = a_si_type AND si_type_video_no = a_type_video_no LIMIT 2,1 INTO s_package_no_list;
+#SELECT s_package_no_list;
+#SELECT COUNT(*) FROM Order_cashs_tbl WHERE oc_status = 1 AND oc_user_no = a_user_no AND oc_mongo_id = a_mongo_id AND oc_member_id = a_member_id AND oc_package_no IN (s_package_no_list) AND  NOW() BETWEEN oc_time_active AND oc_time_deadline INTO result;
+
+#SELECT COUNT(*) FROM Order_cashs_tbl WHERE oc_status = 1 AND oc_user_no = a_user_no AND oc_mongo_id = a_mongo_id AND oc_member_id = a_member_id AND oc_package_no IN (SELECT DISTINCT si_package_no FROM Sold_items_tbl WHERE si_status= 1 AND si_type = a_si_type AND si_type_video_no = a_type_video_no) AND  NOW() BETWEEN oc_time_active AND oc_time_deadline INTO result;
+#SELECT a_mongo_id;
+#SELECT oc_time_active,oc_time_deadline FROM Order_cashs_tbl WHERE oc_status = 1 AND oc_mongo_id = a_mongo_id;
+#SELECT COUNT(*) FROM Order_cashs_tbl WHERE oc_status = 1 AND oc_mongo_id = a_mongo_id AND  NOW() BETWEEN oc_time_active AND oc_time_deadline;
+SELECT COUNT(*) FROM Order_cashs_tbl WHERE oc_status = 1 AND oc_mongo_id = a_mongo_id AND oc_package_no IN (SELECT DISTINCT si_package_no FROM Sold_items_tbl WHERE si_status= 1 AND si_type = a_si_type AND si_type_video_no = a_type_video_no) AND  NOW() BETWEEN oc_time_active AND oc_time_deadline INTO result;
+IF(result > 0) THEN
+SET result=1;
+END IF;
+
+END//
+DELIMITER ;
+
+
+###############################################################################
+                          測試-test_Billing
+###############################################################################
+
+#//判別使用者是否可觀看影片 check rights 
+
+USE test_Billing
+DROP PROCEDURE IF EXISTS check_rights;
+
+DELIMITER //
+Create procedure check_rights(a_user_no int(11),a_mongo_id varchar(10),a_member_id varchar(6),a_si_type varchar(20),a_type_video_no int(11),out result varchar(40))
+BEGIN
+
+DECLARE s_package_no_list varchar(255);
+DECLARE s_COUNT tinyint(5);
+DECLARE s_type tinyint(5);
+
+SET result=0;
+
+#SELECT GROUP_CONCAT(DISTINCT si_package_no) FROM Sold_items_tbl WHERE si_status= 1 AND si_type = a_si_type AND si_type_video_no = a_type_video_no GROUP BY si_type_video_no INTO s_package_no_list;
+#SELECT DISTINCT si_package_no FROM Sold_items_tbl WHERE si_status= 1 AND si_type = a_si_type AND si_type_video_no = a_type_video_no LIMIT 2,1 INTO s_package_no_list;
+#SELECT s_package_no_list;
+#SELECT COUNT(*) FROM Order_cashs_tbl WHERE oc_status = 1 AND oc_user_no = a_user_no AND oc_mongo_id = a_mongo_id AND oc_member_id = a_member_id AND oc_package_no IN (s_package_no_list) AND  NOW() BETWEEN oc_time_active AND oc_time_deadline INTO result;
+
+#SELECT COUNT(*) FROM Order_cashs_tbl WHERE oc_status = 1 AND oc_user_no = a_user_no AND oc_mongo_id = a_mongo_id AND oc_member_id = a_member_id AND oc_package_no IN (SELECT DISTINCT si_package_no FROM Sold_items_tbl WHERE si_status= 1 AND si_type = a_si_type AND si_type_video_no = a_type_video_no) AND  NOW() BETWEEN oc_time_active AND oc_time_deadline INTO result;
+#SELECT a_mongo_id;
+#SELECT oc_time_active,oc_time_deadline FROM Order_cashs_tbl WHERE oc_status = 1 AND oc_mongo_id = a_mongo_id;
+#SELECT COUNT(*) FROM Order_cashs_tbl WHERE oc_status = 1 AND oc_mongo_id = a_mongo_id AND  NOW() BETWEEN oc_time_active AND oc_time_deadline;
+SELECT COUNT(*) FROM Order_cashs_tbl WHERE oc_status = 1 AND oc_mongo_id = a_mongo_id AND oc_package_no IN (SELECT DISTINCT si_package_no FROM Sold_items_tbl WHERE si_status= 1 AND si_type = a_si_type AND si_type_video_no = a_type_video_no) AND  NOW() BETWEEN oc_time_active AND oc_time_deadline INTO result;
+IF(result > 0) THEN
+SET result=1;
+END IF;
+
+END//
+DELIMITER ;
+
+
+###############################################################################
+                          檢驗
+###############################################################################
+
+#1 可觀看
+#0 不可觀看
+
+#call check_rights(a_user_no int(11),a_mongo_id varchar(10),a_member_id varchar(6),a_si_type varchar(20),a_type_video_no int(11),out result varchar(40))
+call check_rights(0,'jb9A4bcTXF','tSETCL','episode',131,@result);
+
+call check_rights(0,'qscesz1234','abcdef','episode',2482,@result);
+
+call check_rights(0,'ZzfVupenHQ','','episode',2482,@result);
+select @result;
+ZzfVupenHQ
+
+SELECT COUNT(*) FROM Order_cashs_tbl WHERE oc_status = 1 AND oc_mongo_id = 'ZzfVupenHQ' AND oc_package_no IN (14);

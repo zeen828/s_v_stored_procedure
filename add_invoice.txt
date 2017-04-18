@@ -1,0 +1,143 @@
+﻿###############################################################################
+                          正式-vidol_billing
+###############################################################################
+
+#//新增發票 
+
+USE vidol_billing
+DROP PROCEDURE IF EXISTS add_invoice;
+
+DELIMITER //
+Create procedure add_invoice(a_MerchantOrderNo varchar(20),a_TransNum varchar(30),a_invoice_type tinyint(2),a_BuyerName varchar(50),a_BuyerUBN varchar(8),a_BuyerPhone varchar(15),a_BuyerAddress varchar(100),a_BuyerEmail varchar(50),a_LoveCode varchar(10),a_ItemName varchar(30),a_ItemPrice int(10),a_Comment varchar(71),out result varchar(40))
+BEGIN
+
+DECLARE s_Category enum('B2B', 'B2C');
+DECLARE s_CreateStatusTime varchar(10);
+DECLARE s_CarrierType varchar(2);
+DECLARE s_CarrierNum varchar(50);
+DECLARE s_LoveCode varchar(10);
+DECLARE s_PrintFlag varchar(1);
+DECLARE s_Amt int(10);
+DECLARE s_TaxAmt int(10);
+DECLARE result_tmp varchar(10);
+DECLARE CONTINUE HANDLER FOR SQLSTATE '23000' SET result = 404;
+SET result_tmp = 200;
+#發票類型(1:電子發票用vidol載具,2:捐贈發票,3:索取三連發票)
+CASE a_invoice_type
+WHEN 1 THEN SET s_Category = 'B2C',s_CarrierType=2,s_CarrierNum=a_BuyerPhone,s_LoveCode='',s_PrintFlag='N';
+WHEN 2 THEN SET s_Category = 'B2C',s_CarrierType='',s_CarrierNum='',s_LoveCode=a_LoveCode,s_PrintFlag='N';
+WHEN 3 THEN SET s_Category = 'B2B',s_CarrierType='',s_CarrierNum='',s_LoveCode='',s_PrintFlag='Y';
+ELSE SET result_tmp = 404;
+END CASE;
+IF (s_Category = 'B2B') THEN
+IF (length(a_BuyerUBN) = 8) THEN
+SET result_tmp = 200;
+ELSE
+SET result_tmp = 411;
+END IF;
+END IF;
+
+IF (result_tmp = 200 ) THEN
+
+SELECT date_add(DATE_FORMAT(NOW(), '%Y-%m-%d'),interval 7 day) INTO s_CreateStatusTime;
+SET s_Amt= CEILING(a_ItemPrice /1.05);
+SET s_TaxAmt = a_ItemPrice - s_Amt;
+
+SET result = 200;
+INSERT INTO `Pay2goInvoice_tbl` (`RespondType`, `Version`, `TimeStamp`,`TransNum`, `MerchantOrderNo`, `Status`, `CreateStatusTime`, `Category`, `BuyerName`, `BuyerUBN`, `BuyerPhone`, `BuyerAddress`, `BuyerEmail`, `CarrierType`, `CarrierNum`, `LoveCode`, `PrintFlag`, `TaxType`, `TaxRate`, `Amt`, `TaxAmt`, `TotalAmt`, `ItemName`, `ItemCount`, `ItemUnit`, `ItemPrice`, `ItemAmt`, `Comment`) VALUES ('JSON', '1.3', unix_timestamp(now()), a_TransNum, a_MerchantOrderNo, '3', s_CreateStatusTime, s_Category, a_BuyerName, a_BuyerUBN, a_BuyerPhone, a_BuyerAddress, a_BuyerEmail, s_CarrierType, s_CarrierNum, s_LoveCode, s_PrintFlag, '1', 5, s_Amt, s_TaxAmt, a_ItemPrice, a_ItemName, 1, '個', a_ItemPrice, a_ItemPrice, a_Comment);
+
+ELSE
+SET result = result_tmp;
+
+END IF;
+
+END//
+DELIMITER ;
+
+
+###############################################################################
+                          測試-test_Billing
+###############################################################################
+
+#//新增發票 
+
+USE test_Billing
+DROP PROCEDURE IF EXISTS add_invoice;
+
+DELIMITER //
+Create procedure add_invoice(a_MerchantOrderNo varchar(20),a_TransNum varchar(30),a_invoice_type tinyint(2),a_BuyerName varchar(50),a_BuyerUBN varchar(8),a_BuyerPhone varchar(15),a_BuyerAddress varchar(100),a_BuyerEmail varchar(50),a_LoveCode varchar(10),a_ItemName varchar(30),a_ItemPrice int(10),a_Comment varchar(71),out result varchar(40))
+BEGIN
+
+DECLARE s_Category enum('B2B', 'B2C');
+DECLARE s_CreateStatusTime varchar(10);
+DECLARE s_CarrierType varchar(2);
+DECLARE s_CarrierNum varchar(50);
+DECLARE s_LoveCode varchar(10);
+DECLARE s_PrintFlag varchar(1);
+DECLARE s_Amt int(10);
+DECLARE s_TaxAmt int(10);
+DECLARE result_tmp varchar(10);
+DECLARE CONTINUE HANDLER FOR SQLSTATE '23000' SET result = 404;
+SET result_tmp = 200;
+#發票類型(1:電子發票用vidol載具,2:捐贈發票,3:索取三連發票)
+CASE a_invoice_type
+WHEN 1 THEN SET s_Category = 'B2C',s_CarrierType=2,s_CarrierNum=a_BuyerPhone,s_LoveCode='',s_PrintFlag='N';
+WHEN 2 THEN SET s_Category = 'B2C',s_CarrierType='',s_CarrierNum='',s_LoveCode=a_LoveCode,s_PrintFlag='N';
+WHEN 3 THEN SET s_Category = 'B2B',s_CarrierType='',s_CarrierNum='',s_LoveCode='',s_PrintFlag='Y';
+ELSE SET result_tmp = 404;
+END CASE;
+IF (s_Category = 'B2B') THEN
+IF (length(a_BuyerUBN) = 8) THEN
+SET result_tmp = 200;
+ELSE
+SET result_tmp = 411;
+END IF;
+END IF;
+
+IF (result_tmp = 200 ) THEN
+
+SELECT date_add(DATE_FORMAT(NOW(), '%Y-%m-%d'),interval 7 day) INTO s_CreateStatusTime;
+SET s_Amt= CEILING(a_ItemPrice /1.05);
+SET s_TaxAmt = a_ItemPrice - s_Amt;
+
+SET result = 200;
+INSERT INTO `Pay2goInvoice_tbl` (`RespondType`, `Version`, `TimeStamp`,`TransNum`, `MerchantOrderNo`, `Status`, `CreateStatusTime`, `Category`, `BuyerName`, `BuyerUBN`, `BuyerPhone`, `BuyerAddress`, `BuyerEmail`, `CarrierType`, `CarrierNum`, `LoveCode`, `PrintFlag`, `TaxType`, `TaxRate`, `Amt`, `TaxAmt`, `TotalAmt`, `ItemName`, `ItemCount`, `ItemUnit`, `ItemPrice`, `ItemAmt`, `Comment`) VALUES ('JSON', '1.3', unix_timestamp(now()), a_TransNum, a_MerchantOrderNo, '3', s_CreateStatusTime, s_Category, a_BuyerName, a_BuyerUBN, a_BuyerPhone, a_BuyerAddress, a_BuyerEmail, s_CarrierType, s_CarrierNum, s_LoveCode, s_PrintFlag, '1', 5, s_Amt, s_TaxAmt, a_ItemPrice, a_ItemName, 1, '個', a_ItemPrice, a_ItemPrice, a_Comment);
+
+ELSE
+SET result = result_tmp;
+
+END IF;
+
+END//
+DELIMITER ;
+
+
+###############################################################################
+                          檢驗
+###############################################################################
+
+#//新增發票 
+#200 發票開立成功
+#404 發票開立失敗
+#411 統編長度錯誤
+
+#call add_invoice(a_MerchantOrderNo varchar(20),a_TransNum varchar(30),a_invoice_type tinyint(2),a_BuyerName varchar(50),a_BuyerUBN varchar(8),a_BuyerPhone varchar(15),a_BuyerAddress varchar(100),a_BuyerEmail varchar(50),a_LoveCode varchar(10),a_ItemName varchar(30),a_ItemPrice int(10),a_Comment varchar(71))
+
+#個人電子發票
+call add_invoice('00014786643780000257','16110314305375721',1,'黃亦銘','','0919276787','台北內湖','cougar1228@gmail.com','','169元 / 30天',127,'a_Comment',@result);
+select @result;
+
+#使用愛心碼
+call add_invoice('00014782490870000037','16110314305375721',2,'亦銘','','0919276787','台北內湖','cougar1228@gmail.com','LoveCode','169元 / 30天',169,'a_Comment',@result);
+select @result;
+
+#使用三聯式
+call add_invoice('00014781541040000023','16110314305375721',3,'三立電視股份有限公司','23740512','0919276787','台北內湖','cougar1228@gmail.com','','特惠價1690元 / 365天',501,'a_Comment',@result);
+select @result;
+
++---------+
+| @result |
++---------+
+|     200 |
++---------+
+#回應碼

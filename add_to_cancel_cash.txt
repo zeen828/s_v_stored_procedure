@@ -1,0 +1,183 @@
+﻿###############################################################################
+                          正式-vidol_billing
+###############################################################################
+
+#/訂單失敗 
+
+USE vidol_billing
+DROP PROCEDURE IF EXISTS add_to_cancel_cash;
+
+DELIMITER //
+Create procedure add_to_cancel_cash(a_order_sn varchar(20),a_status tinyint(1),a_refund int(10),a_note varchar(255),out result varchar(40))
+BEGIN
+
+DECLARE s_package_no int(11);
+DECLARE s_user_no int(11);
+DECLARE s_mongo_id varchar(10); 
+DECLARE s_member_id varchar(6);
+DECLARE s_type tinyint(5);
+DECLARE s_unit enum('hour', 'count');
+DECLARE s_unit_value int(10);
+DECLARE s_subtotal  int(10);
+DECLARE s_oc_order_sn bigint(20);
+DECLARE s_time_active timestamp;
+DECLARE s_time_deadline timestamp;
+DECLARE st_time_active timestamp;
+DECLARE st_time_deadline timestamp;
+
+SET result = 401;
+
+
+IF (a_status = 2) THEN
+
+IF (SELECT COUNT(*) FROM `Order_cashs_tbl` WHERE  oc_order_sn = a_order_sn AND oc_status =1 AND oc_active_status = 1 ) > 0 THEN
+
+SELECT oc_package_no,oc_user_no,	oc_mongo_id,oc_member_id,oc_package_type,oc_package_unit,oc_package_unit_value,oc_subtotal,oc_time_active,oc_time_deadline  FROM `Order_cashs_tbl` WHERE oc_order_sn = a_order_sn INTO s_package_no,s_user_no,s_mongo_id,s_member_id,s_type,s_unit,s_unit_value,s_subtotal,s_time_active,s_time_deadline;
+
+IF(s_subtotal-a_refund) > -1 THEN
+
+UPDATE Order_cashs_tbl SET oc_status = a_status,oc_active_status=0,oc_refund = a_refund,oc_subtotal=oc_subtotal - a_refund,oc_note = a_note  WHERE oc_order_sn = a_order_sn;
+UPDATE Orders_tbl SET o_status = a_status WHERE o_order_sn = a_order_sn;
+UPDATE Pay2goInvoice_tbl SET pi_order_status = a_status, Comment = a_note WHERE MerchantOrderNo = a_order_sn;
+
+#package類型('hour', 'count')
+IF (s_unit='hour') THEN
+DROP TABLE IF EXISTS TOrder_cashs_tbl;
+CREATE TEMPORARY TABLE TOrder_cashs_tbl (t_oc_order_sn bigint(20),t_oc_package_type tinyint(5),t_oc_time_active timestamp,t_oc_time_deadline timestamp);
+
+INSERT INTO TOrder_cashs_tbl (t_oc_order_sn,t_oc_package_type,t_oc_time_active,t_oc_time_deadline) SELECT oc_order_sn,oc_package_type,oc_time_active,oc_time_deadline FROM vidol_billing.`Order_cashs_tbl` WHERE oc_time_active > s_time_active AND oc_status = 1 AND oc_active_status = 1 AND oc_package_type = s_type AND oc_mongo_id = s_mongo_id ORDER BY oc_time_active ASC;
+
+#SELECT * FROM TOrder_cashs_tbl;
+WHILE(SELECT COUNT(*) FROM TOrder_cashs_tbl )> 0 DO
+SELECT t_oc_order_sn,t_oc_time_active,t_oc_time_deadline FROM TOrder_cashs_tbl ORDER BY t_oc_time_active ASC LIMIT 1 into s_oc_order_sn,st_time_active,st_time_deadline;
+
+UPDATE Order_cashs_tbl SET oc_time_active = s_time_active,oc_time_deadline=s_time_deadline WHERE oc_order_sn =s_oc_order_sn;
+SET s_time_active = st_time_active, s_time_deadline= st_time_deadline;
+DELETE FROM TOrder_cashs_tbl WHERE t_oc_order_sn=s_oc_order_sn;
+END WHILE;
+DROP TABLE IF EXISTS TOrder_cashs_tbl;
+END IF;
+
+SET result = 200;
+ELSE
+SET result = 500;
+END IF;
+
+ELSE
+
+SET result = 405;
+
+END IF;
+
+ELSE
+#o_status = -1
+#o_status = 3
+UPDATE Orders_tbl SET o_status = a_status,o_note = a_note WHERE o_order_sn = a_order_sn;
+UPDATE Pay2goInvoice_tbl SET pi_order_status = a_status, Comment = a_note WHERE MerchantOrderNo = a_order_sn;
+
+SET result = 200;
+END IF;
+
+
+END//
+DELIMITER ;
+
+###############################################################################
+                          測試-test_Billing
+###############################################################################
+
+#/訂單失敗 
+
+USE test_Billing
+DROP PROCEDURE IF EXISTS add_to_cancel_cash;
+
+DELIMITER //
+Create procedure add_to_cancel_cash(a_order_sn varchar(20),a_status tinyint(1),a_refund int(10),a_note varchar(255),out result varchar(40))
+BEGIN
+
+DECLARE s_package_no int(11);
+DECLARE s_user_no int(11);
+DECLARE s_mongo_id varchar(10); 
+DECLARE s_member_id varchar(6);
+DECLARE s_type tinyint(5);
+DECLARE s_unit enum('hour', 'count');
+DECLARE s_unit_value int(10);
+DECLARE s_subtotal  int(10);
+DECLARE s_oc_order_sn bigint(20);
+DECLARE s_time_active timestamp;
+DECLARE s_time_deadline timestamp;
+DECLARE st_time_active timestamp;
+DECLARE st_time_deadline timestamp;
+
+SET result = 401;
+
+
+IF (a_status = 2) THEN
+
+IF (SELECT COUNT(*) FROM `Order_cashs_tbl` WHERE  oc_order_sn = a_order_sn AND oc_status =1 AND oc_active_status = 1 ) > 0 THEN
+
+SELECT oc_package_no,oc_user_no,	oc_mongo_id,oc_member_id,oc_package_type,oc_package_unit,oc_package_unit_value,oc_subtotal,oc_time_active,oc_time_deadline  FROM `Order_cashs_tbl` WHERE oc_order_sn = a_order_sn INTO s_package_no,s_user_no,s_mongo_id,s_member_id,s_type,s_unit,s_unit_value,s_subtotal,s_time_active,s_time_deadline;
+
+IF(s_subtotal-a_refund) > -1 THEN
+
+UPDATE Order_cashs_tbl SET oc_status = a_status,oc_active_status=0,oc_refund = a_refund,oc_subtotal=oc_subtotal - a_refund,oc_note = a_note  WHERE oc_order_sn = a_order_sn;
+UPDATE Orders_tbl SET o_status = a_status WHERE o_order_sn = a_order_sn;
+UPDATE Pay2goInvoice_tbl SET pi_order_status = a_status, Comment = a_note WHERE MerchantOrderNo = a_order_sn;
+
+#package類型('hour', 'count')
+IF (s_unit='hour') THEN
+DROP TABLE IF EXISTS TOrder_cashs_tbl;
+CREATE TEMPORARY TABLE TOrder_cashs_tbl (t_oc_order_sn bigint(20),t_oc_package_type tinyint(5),t_oc_time_active timestamp,t_oc_time_deadline timestamp);
+
+INSERT INTO TOrder_cashs_tbl (t_oc_order_sn,t_oc_package_type,t_oc_time_active,t_oc_time_deadline) SELECT oc_order_sn,oc_package_type,oc_time_active,oc_time_deadline FROM vidol_billing.`Order_cashs_tbl` WHERE oc_time_active > s_time_active AND oc_status = 1 AND oc_active_status = 1 AND oc_package_type = s_type AND oc_mongo_id = s_mongo_id ORDER BY oc_time_active ASC;
+
+#SELECT * FROM TOrder_cashs_tbl;
+WHILE(SELECT COUNT(*) FROM TOrder_cashs_tbl )> 0 DO
+SELECT t_oc_order_sn,t_oc_time_active,t_oc_time_deadline FROM TOrder_cashs_tbl ORDER BY t_oc_time_active ASC LIMIT 1 into s_oc_order_sn,st_time_active,st_time_deadline;
+
+UPDATE Order_cashs_tbl SET oc_time_active = s_time_active,oc_time_deadline=s_time_deadline WHERE oc_order_sn =s_oc_order_sn;
+SET s_time_active = st_time_active, s_time_deadline= st_time_deadline;
+DELETE FROM TOrder_cashs_tbl WHERE t_oc_order_sn=s_oc_order_sn;
+END WHILE;
+DROP TABLE IF EXISTS TOrder_cashs_tbl;
+END IF;
+
+SET result = 200;
+ELSE
+SET result = 500;
+END IF;
+
+ELSE
+
+SET result = 405;
+
+END IF;
+
+ELSE
+#o_status = -1
+#o_status = 3
+UPDATE Orders_tbl SET o_status = a_status,o_note = a_note WHERE o_order_sn = a_order_sn;
+UPDATE Pay2goInvoice_tbl SET pi_order_status = a_status, Comment = a_note WHERE MerchantOrderNo = a_order_sn;
+
+SET result = 200;
+END IF;
+
+
+END//
+DELIMITER ;
+
+###############################################################################
+                          檢驗
+###############################################################################
+
+#200 付費成功
+#405 訂單號碼不存在
+#500 退款金額錯誤
+
+#call add_to_cancel_cash(a_order_sn varchar(20),a_status tinyint(1),a_refund int(10),a_note varchar(255),out result varchar(40))
+
+call add_to_cancel_cash('00014785218440000168',2,20,'退款20元',@result);
+select @result;
+
+call add_to_cancel_cash('00014794650160000328',2,0,NULL,@result);
+select @result;
